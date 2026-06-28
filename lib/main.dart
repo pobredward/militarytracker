@@ -35,8 +35,12 @@ void main() async {
   // 한국어 날짜 형식 초기화
   await initializeDateFormatting('ko_KR', null);
   
-  // 알림 서비스 초기화
-  await NotificationService().initialize();
+  // 알림 서비스 초기화 (실패해도 앱은 계속 실행)
+  try {
+    await NotificationService().initialize();
+  } catch (e) {
+    debugPrint('NotificationService initialization failed: $e');
+  }
   
   runApp(
     const ProviderScope(

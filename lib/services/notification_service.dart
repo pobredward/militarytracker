@@ -44,9 +44,13 @@ class NotificationService {
     // 로컬 알림 초기화
     await _initializeLocalNotifications();
 
-    // FCM 토큰 가져오기
-    _fcmToken = await _fcm.getToken();
-    logger.i('FCM Token: $_fcmToken');
+    // FCM 토큰 가져오기 (APNS 토큰이 아직 준비 안 됐을 수 있으므로 예외 처리)
+    try {
+      _fcmToken = await _fcm.getToken();
+      logger.i('FCM Token: $_fcmToken');
+    } catch (e) {
+      logger.w('FCM token not available yet (APNS may not be ready): $e');
+    }
 
     // 토큰 갱신 리스너
     _fcm.onTokenRefresh.listen((token) {
