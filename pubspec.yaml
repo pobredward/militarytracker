@@ -1,0 +1,97 @@
+name: militarytracker
+description: A military training tracker app with community features
+publish_to: 'none'
+version: 1.0.2+4
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # Firebase
+  firebase_core: ^4.3.0
+  firebase_auth: ^6.1.3
+  firebase_messaging: ^16.1.0
+  cloud_firestore: ^6.1.1
+  google_sign_in: ^7.2.0
+  firebase_storage: ^13.0.5
+  
+  # Image Picker & Compression
+  image_picker: ^1.1.2
+  flutter_image_compress: ^2.3.0
+  path_provider: ^2.1.4
+  path: ^1.9.0
+  uuid: ^4.5.1
+  
+  # UI & Navigation
+  cupertino_icons: ^1.0.6
+  google_fonts: ^6.1.0
+  go_router: ^13.0.0
+  
+  # State Management (Riverpod)
+  flutter_riverpod: ^2.4.9
+  riverpod_annotation: ^2.3.3
+  
+  # Immutable Models (Freezed)
+  freezed_annotation: ^2.4.1
+  json_annotation: ^4.8.1
+  
+  # Utilities
+  intl: ^0.19.0
+  logger: ^2.0.2
+  shared_preferences: ^2.2.2
+  
+  # Network
+  dio: ^5.4.0
+  pretty_dio_logger: ^1.3.1
+  
+  # Camera & ML Kit
+  camera: ^0.11.0+2
+  google_mlkit_pose_detection: ^0.13.0
+  
+  # Sensors & Location
+  pedometer: ^4.0.2
+  geolocator: ^13.0.2
+  permission_handler: ^11.3.1
+  flutter_local_notifications: ^19.5.0
+  timezone: ^0.10.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  
+  # Code Generation
+  build_runner: ^2.4.7
+  freezed: ^2.4.6
+  json_serializable: ^6.7.1
+  riverpod_generator: ^2.3.9
+  custom_lint: ^0.5.7
+  riverpod_lint: ^2.3.7
+  flutter_launcher_icons: ^0.14.4
+  
+  # Testing
+  mockito: ^5.4.4
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/images/
+
+# App Icon Configuration
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/app_icon.png"
+  min_sdk_android: 21
+  
+  # iOS specific
+  ios_content_json: true
+  remove_alpha_ios: true
+  
+  # Android specific
+  adaptive_icon_background: "#1A1A1A"
+  adaptive_icon_foreground: "assets/images/app_icon.png"

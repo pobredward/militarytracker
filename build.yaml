@@ -1,0 +1,18 @@
+# Build Runner 설정
+targets:
+  $default:
+    builders:
+      freezed:
+        enabled: true
+        generate_for:
+          - lib/models/*.dart
+      json_serializable:
+        enabled: true
+        generate_for:
+          - lib/models/*.dart
+      riverpod_generator:
+        enabled: true
+        generate_for:
+          - lib/providers/*.dart
+          - lib/features/**/presentation/*.dart
+
