@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "밀리터리트래커",
+    "slug": "militarytracker",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "militarytracker",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.militarytracker.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#1B3A6B",
+        "foregroundImage": "./assets/adaptive-icon.png"
+      },
+      "package": "com.militarytracker.app"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      "expo-font",
+      "expo-splash-screen",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#1B3A6B"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
