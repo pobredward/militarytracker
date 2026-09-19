@@ -1,32 +1,33 @@
 import { useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  TextInput, Alert,
-} from 'react-native';
+  TextInput, } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors } from '../../src/utils/colors';
+import { showAlert } from '../../src/utils/alert';
 import { useAppStore } from '../../src/stores/appStore';
 import { useAuthStore } from '../../src/stores/authStore';
 import { PART_LABEL, PART_ORDER, exById } from '../../src/data/exercises';
 import { saveWeight } from '../../src/services/workoutService';
-import { logout, deleteAccount } from '../../src/services/authService';
+import { logout, deleteAccount, saveProfile } from '../../src/services/authService';
 import { askCoach, AIUnavailable } from '../../src/services/aiService';
-import { calcBodyStats, GOAL_LABEL } from '../../src/utils/body';
-import { setsByPart, weakestPart, totalSets, totalVolume, currentStreakDays, fmtDuration } from '../../src/utils/stats';
+import { calcBodyStats, effectiveWeight, GOAL_LABEL } from '../../src/utils/body';
+import { setsByPart, weakestPart, totalSets, totalVolume, currentStreakDays, fmtDuration, fmtVolume } from '../../src/utils/stats';
 
 export default function MyScreen() {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, patchUser } = useAuthStore();
   const {
     profile, plan, logs, weights, chat, chatBusy,
-    addChat, setChatBusy, addWeight, resetAll,
+    addChat, setChatBusy, addWeight, resetAll, setProfile,
   } = useAppStore();
   const [weightInput, setWeightInput] = useState('');
   const [chatInput, setChatInput] = useState('');
   const scrollRef = useRef<ScrollView>(null);
 
-  const st = calcBodyStats(profile);
+  const st = calcBodyStats(profile, weights);
+  const eff = effectiveWeight(profile, weights);
   const vol = setsByPart(logs, { weekOnly: true });
   const maxVol = Math.max(4, ...PART_ORDER.map((p) => vol[p]));
   const weakest = weakestPart(vol);
@@ -39,12 +40,29 @@ export default function MyScreen() {
 
   async function handleSaveWeight() {
     const kg = parseFloat(weightInput);
-    if (!kg || !user) return;
+    if (!user) return;
+    if (!kg || kg <= 0 || kg > 400) {
+      showAlert('입력 확인', '체중을 숫자로 입력해주세요. (예: 72.5)');
+      return;
+    }
     try {
       addWeight(await saveWeight(user.uid, kg));
       setWeightInput('');
     } catch {
-      Alert.alert('오류', '체중 저장에 실패했습니다.');
+      showAlert('오류', '체중 저장에 실패했습니다.');
+    }
+  }
+
+  async function applyTrendWeight() {
+    if (!user || !profile || !eff?.trend) return;
+    const next = { ...profile, weight: String(eff.trend) };
+    try {
+      await saveProfile(user.uid, next);
+      setProfile(next);
+      patchUser({ profile: next });
+      showAlert('기준 체중 갱신', `${eff.trend}kg 로 갱신했습니다.`);
+    } catch {
+      showAlert('오류', '저장에 실패했습니다.');
     }
   }
 
@@ -96,7 +114,7 @@ export default function MyScreen() {
   }
 
   function confirmDelete() {
-    Alert.alert(
+    showAlert(
       '계정 삭제',
       '운동 기록·체중·플랜이 모두 삭제되며 되돌릴 수 없습니다. 진행할까요?',
       [
@@ -111,7 +129,7 @@ export default function MyScreen() {
               router.replace('/auth/login');
             } catch (e) {
               const code = (e as { code?: string })?.code;
-              Alert.alert(
+              showAlert(
                 '삭제 실패',
                 code === 'auth/requires-recent-login'
                   ? '보안을 위해 다시 로그인한 뒤 삭제해주세요.'
@@ -135,12 +153,26 @@ export default function MyScreen() {
         {/* Summary */}
         <View style={s.summaryRow}>
           <Summary value={`${weekSets}`} label="이번 주 세트" />
-          <Summary value={weekVolume > 0 ? `${Math.round(weekVolume / 1000)}t` : '0'} label="주간 볼륨" />
+          <Summary value={fmtVolume(weekVolume)} label="주간 볼륨" />
           <Summary value={`${streakDays}일`} label="연속 기록" />
         </View>
 
+        {/* 빠른 진입 */}
+        <View style={s.menuRow}>
+          <TouchableOpacity style={s.menuBtn} onPress={() => router.push('/history')}>
+            <Text style={s.menuTitle}>운동 기록</Text>
+            <Text style={s.menuSub}>{logs.length}회 누적</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.menuBtn} onPress={() => router.push('/profile/edit')}>
+            <Text style={s.menuTitle}>내 정보</Text>
+            <Text style={s.menuSub}>
+              {profile ? `${profile.height}cm · ${profile.weight}kg` : '설정 필요'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Volume chart */}
-        <Text style={s.sectionLabel}>주간 부위별 볼륨</Text>
+        <Text style={s.sectionLabel}>주간 부위별 세트 수</Text>
         <View style={s.card}>
           {weekSets > 0 ? (
             <>
@@ -190,6 +222,20 @@ export default function MyScreen() {
             </ScrollView>
           ) : (
             <Text style={s.emptyTxt}>아직 기록이 없습니다.</Text>
+          )}
+          {eff?.trend != null && (
+            <View style={s.trendRow}>
+              <Text style={s.trendTxt}>
+                최근 추세 <Text style={s.trendHi}>{eff.trend}kg</Text>
+                {'  ·  '}기준 {eff.baseline}kg
+                {eff.drift !== 0 ? `  (${eff.drift > 0 ? '+' : ''}${eff.drift})` : ''}
+              </Text>
+              {eff.shouldUpdate && (
+                <TouchableOpacity style={s.trendBtn} onPress={applyTrendWeight}>
+                  <Text style={s.trendBtnTxt}>기준 갱신</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           )}
           <View style={s.weightRow}>
             <TextInput
@@ -276,6 +322,13 @@ const s = StyleSheet.create({
   scrollInner: { paddingHorizontal: 16, paddingBottom: 36 },
 
   summaryRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  menuRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  menuBtn: {
+    flex: 1, backgroundColor: colors.panel, borderRadius: 14, padding: 14,
+    borderWidth: 1, borderColor: colors.line,
+  },
+  menuTitle: { fontSize: 14, fontWeight: '700', color: colors.ink },
+  menuSub: { fontSize: 10.5, color: colors.muted, marginTop: 4 },
   summary: {
     flex: 1, backgroundColor: colors.panel2, borderRadius: 14, padding: 14,
     borderWidth: 1, borderColor: colors.line2,
@@ -316,6 +369,18 @@ const s = StyleSheet.create({
   weightChipVal: { fontSize: 16, fontWeight: '700', color: colors.ink },
   weightChipUnit: { fontSize: 11, fontWeight: '400', color: colors.mid },
   weightRow: { flexDirection: 'row', gap: 8 },
+  trendRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    gap: 10, marginBottom: 12,
+  },
+  trendTxt: { fontSize: 11.5, color: colors.muted, flex: 1 },
+  trendHi: { color: colors.ink, fontWeight: '700' },
+  trendBtn: {
+    backgroundColor: colors.panel3, borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 6,
+    borderWidth: 1, borderColor: colors.line2,
+  },
+  trendBtnTxt: { fontSize: 11, color: colors.ink, fontWeight: '700' },
   weightInput: {
     flex: 1, backgroundColor: colors.panel2,
     borderWidth: 1, borderColor: colors.line2,

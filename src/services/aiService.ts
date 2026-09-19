@@ -8,6 +8,7 @@ import { functions } from './firebase';
 import { DietPlan, Plan, UserProfile } from '../types';
 import { buildLocalPlan, planFromAI } from '../utils/planner';
 import { calcBodyStats, FOOD_LABEL, GOAL_LABEL } from '../utils/body';
+import type { BodyStats } from '../types';
 import { exFilter, PART_LABEL } from '../data/exercises';
 
 export const FALLBACK_DIET: DietPlan = {
@@ -54,8 +55,9 @@ export async function generatePlan(p: UserProfile): Promise<Plan> {
 }
 
 // ─── 식단 ──────────────────────────────────────────────────────────────────
-export async function generateDiet(p: UserProfile): Promise<DietPlan> {
-  const st = calcBodyStats(p);
+export async function generateDiet(p: UserProfile, stats?: BodyStats): Promise<DietPlan> {
+  // 호출 측에서 추세 체중이 반영된 stats 를 넘기면 그대로 쓴다
+  const st = stats ?? calcBodyStats(p);
   if (!st) return FALLBACK_DIET;
   try {
     const call = httpsCallable(functions, 'aiDiet');
@@ -70,7 +72,7 @@ export async function generateDiet(p: UserProfile): Promise<DietPlan> {
       allergy: p.allergy || '없음',
     });
     const j = res.data as DietPlan;
-    if (j?.meals?.length) return { ...j, src: 'AI' };
+    if (j?.meals?.length) return { ...j, src: 'AI', createdAt: new Date().toISOString() };
   } catch (e) {
     if (!isUnavailable(e)) console.warn('[aiDiet]', e);
   }

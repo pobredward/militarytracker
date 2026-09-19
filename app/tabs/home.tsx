@@ -5,10 +5,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors } from '../../src/utils/colors';
 import { useAppStore } from '../../src/stores/appStore';
-import { useAuthStore } from '../../src/stores/authStore';
 import { FEED } from '../../src/data/feed';
 import { exById } from '../../src/data/exercises';
-import SessionPlayer from '../../src/components/SessionPlayer';
 import ExerciseMedia from '../../src/components/ExerciseMedia';
 import { nextDayIdx, weekStreak, currentStreakDays, totalSets } from '../../src/utils/stats';
 
@@ -16,8 +14,7 @@ const DOW = ['월', '화', '수', '목', '금', '토', '일'];
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { user } = useAuthStore();
-  const { plan, logs, session, startSession } = useAppStore();
+  const { plan, logs, startSession } = useAppStore();
 
   const today = new Date().toLocaleDateString('ko-KR', {
     month: '2-digit', day: '2-digit', weekday: 'short',
@@ -135,7 +132,6 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
 
-      {session && <SessionPlayer />}
     </SafeAreaView>
   );
 }

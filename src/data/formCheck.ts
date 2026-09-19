@@ -94,4 +94,3 @@ export const FORM_VIEW: FormView[] = FORM.map((f) => {
 export const formByExId = (exId: string): FormView | undefined =>
   FORM_VIEW.find((f) => f.exId === exId);
 
-export const FORM_PARTS: string[] = ['전체', ...Array.from(new Set(FORM_VIEW.map((f) => f.partLabel)))];

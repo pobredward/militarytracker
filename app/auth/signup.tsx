@@ -8,13 +8,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert,
+  
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
 import { signUpWithEmail } from '../../src/services/authService';
 import { colors } from '../../src/utils/colors';
+import { showAlert } from '../../src/utils/alert';
 
 export default function SignupScreen() {
   const [displayName, setDisplayName] = useState('');
@@ -25,15 +26,15 @@ export default function SignupScreen() {
 
   async function handleSignup() {
     if (!displayName.trim() || !email.trim() || !password || !confirmPassword) {
-      Alert.alert('입력 오류', '모든 항목을 입력해주세요.');
+      showAlert('입력 오류', '모든 항목을 입력해주세요.');
       return;
     }
     if (password !== confirmPassword) {
-      Alert.alert('비밀번호 오류', '비밀번호가 일치하지 않습니다.');
+      showAlert('비밀번호 오류', '비밀번호가 일치하지 않습니다.');
       return;
     }
     if (password.length < 6) {
-      Alert.alert('비밀번호 오류', '비밀번호는 6자 이상이어야 합니다.');
+      showAlert('비밀번호 오류', '비밀번호는 6자 이상이어야 합니다.');
       return;
     }
     setLoading(true);
@@ -47,7 +48,7 @@ export default function SignupScreen() {
           : e.code === 'auth/invalid-email'
           ? '올바른 이메일 형식이 아닙니다.'
           : '회원가입에 실패했습니다. 다시 시도해주세요.';
-      Alert.alert('회원가입 실패', msg);
+      showAlert('회원가입 실패', msg);
     } finally {
       setLoading(false);
     }

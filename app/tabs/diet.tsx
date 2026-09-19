@@ -2,22 +2,58 @@ import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { colors } from '../../src/utils/colors';
+import { showAlert } from '../../src/utils/alert';
 import { useAppStore } from '../../src/stores/appStore';
-import { calcBodyStats, FOOD_LABEL } from '../../src/utils/body';
+import { useAuthStore } from '../../src/stores/authStore';
+import { calcBodyStats, effectiveWeight, FOOD_LABEL, GOAL_LABEL } from '../../src/utils/body';
 import { generateDiet } from '../../src/services/aiService';
+import { saveProfile } from '../../src/services/authService';
+import { localDate } from '../../src/services/workoutService';
+
+/** 이 일수가 지나면 식단을 다시 구성하도록 권유한다 */
+const DIET_STALE_DAYS = 7;
+
+const daysSince = (iso?: string): number | null => {
+  if (!iso) return null;
+  const d = new Date(iso).getTime();
+  if (!Number.isFinite(d)) return null;
+  return Math.floor((Date.now() - d) / 86_400_000);
+};
 
 export default function DietScreen() {
-  const { profile, diet, dietLoading, setDiet, setDietLoading } = useAppStore();
-  const st = calcBodyStats(profile);
+  const router = useRouter();
+  const { user, patchUser } = useAuthStore();
+  const { profile, weights, diet, dietLoading, setDiet, setDietLoading, setProfile } = useAppStore();
+
+  const st = calcBodyStats(profile, weights);
+  const eff = effectiveWeight(profile, weights);
+  const age = daysSince(diet?.createdAt);
+  const stale = age !== null && age >= DIET_STALE_DAYS;
 
   async function genDiet() {
     if (!profile || dietLoading) return;
     setDietLoading(true);
     try {
-      setDiet(await generateDiet(profile));
+      const next = await generateDiet(profile, st ?? undefined);
+      if (next.src === 'AI' || !diet) setDiet({ ...next, createdAt: new Date().toISOString() });
+      else showAlert('연결 실패', '식단을 새로 구성하지 못했습니다. 기존 식단을 유지합니다.');
     } finally {
       setDietLoading(false);
+    }
+  }
+
+  async function applyTrendWeight() {
+    if (!user || !profile || !eff?.trend) return;
+    const next = { ...profile, weight: String(eff.trend) };
+    try {
+      await saveProfile(user.uid, next);
+      setProfile(next);
+      patchUser({ profile: next });
+      showAlert('기준 체중 갱신', `${eff.trend}kg 로 갱신했습니다. 목표 칼로리가 다시 계산됩니다.`);
+    } catch {
+      showAlert('오류', '저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
     }
   }
 
@@ -25,7 +61,12 @@ export default function DietScreen() {
     return (
       <SafeAreaView style={s.root} edges={['top']}>
         <View style={s.empty}>
-          <Text style={s.emptyTxt}>신체 정보를 불러오는 중입니다.{'\n'}온보딩을 완료하지 않았다면 먼저 진행해주세요.</Text>
+          <Text style={s.emptyTxt}>
+            신체 정보가 필요합니다.{'\n'}내 정보를 입력하면 목표 칼로리를 계산합니다.
+          </Text>
+          <TouchableOpacity style={s.emptyBtn} onPress={() => router.push('/profile/edit')}>
+            <Text style={s.emptyBtnTxt}>내 정보 입력</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -39,6 +80,35 @@ export default function DietScreen() {
       </View>
 
       <ScrollView style={s.scroll} contentContainerStyle={s.scrollInner} showsVerticalScrollIndicator={false}>
+        {/* 계산 근거 — 숫자의 출처와 수정 경로 */}
+        <TouchableOpacity style={s.basisCard} activeOpacity={0.8} onPress={() => router.push('/profile/edit')}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.basisLabel}>계산 기준</Text>
+            <Text style={s.basisMain}>
+              {st.weightUsed}kg · {profile.height}cm · {profile.age}세 · {GOAL_LABEL[profile.goal]}
+            </Text>
+            <Text style={s.basisSub}>
+              {st.weightSrc === 'trend'
+                ? `최근 체중 기록의 추세값 · 기준 ${eff?.baseline}kg`
+                : '내 정보에 저장된 기준 체중'}
+            </Text>
+          </View>
+          <Text style={s.basisChev}>›</Text>
+        </TouchableOpacity>
+
+        {/* 기준 체중과 추세가 벌어졌을 때만 */}
+        {eff?.shouldUpdate && (
+          <View style={s.driftBox}>
+            <Text style={s.driftTxt}>
+              최근 추세 <Text style={s.driftHi}>{eff.trend}kg</Text> 로 기준({eff.baseline}kg)과
+              {' '}{Math.abs(eff.drift)}kg 차이가 납니다.
+            </Text>
+            <TouchableOpacity style={s.driftBtn} onPress={applyTrendWeight}>
+              <Text style={s.driftBtnTxt}>기준 체중 갱신</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <Text style={s.sectionLabel}>DAILY TARGET</Text>
         <View style={s.macroRow}>
           <MacroCard value={`${st.kcal}`} unit="kcal" label="목표 칼로리" />
@@ -53,9 +123,19 @@ export default function DietScreen() {
         <View style={s.sectionRow}>
           <Text style={s.sectionLabel}>하루 식단</Text>
           <Text style={s.sectionSub}>
-            {FOOD_LABEL[profile.food]} 기준{diet?.src === 'AI' ? ' · AI 구성' : ''}
+            {FOOD_LABEL[profile.food]} 기준
+            {diet?.src === 'AI' ? ' · AI 구성' : ''}
+            {age !== null ? ` · ${age === 0 ? '오늘' : `${age}일 전`} 구성` : ''}
           </Text>
         </View>
+
+        {stale && (
+          <View style={s.staleBox}>
+            <Text style={s.staleTxt}>
+              {age}일 전에 만든 식단입니다. 체중이나 목표가 바뀌었다면 다시 구성하세요.
+            </Text>
+          </View>
+        )}
 
         {diet ? (
           <>
@@ -81,15 +161,26 @@ export default function DietScreen() {
         )}
 
         <TouchableOpacity
-          style={[s.genBtn, diet && s.genGhost, dietLoading && s.genOff]}
+          style={[s.genBtn, diet && !stale && s.genGhost, dietLoading && s.genOff]}
           onPress={genDiet}
           disabled={dietLoading}
         >
           {dietLoading ? (
-            <ActivityIndicator color={diet ? colors.mid : colors.bg} />
+            <ActivityIndicator color={diet && !stale ? colors.mid : colors.bg} />
           ) : (
-            <Text style={[s.genTxt, diet && s.genTxtGhost]}>{diet ? '다시 구성' : '식단 생성'}</Text>
+            <Text style={[s.genTxt, diet && !stale && s.genTxtGhost]}>
+              {diet ? '다시 구성' : '식단 생성'}
+            </Text>
           )}
+        </TouchableOpacity>
+
+        {/* 막다른 길 방지 — 다음 행동 */}
+        <TouchableOpacity style={s.linkRow} onPress={() => router.push('/tabs/my')}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.linkTitle}>AI 코치에게 물어보기</Text>
+            <Text style={s.linkSub}>대체 음식, 외식 메뉴, 보충제 등</Text>
+          </View>
+          <Text style={s.basisChev}>›</Text>
         </TouchableOpacity>
 
         <Text style={s.notice}>일반적 영양 가이드이며 의학적 조언이 아닙니다.</Text>
@@ -117,14 +208,38 @@ const s = StyleSheet.create({
   meta: { fontSize: 10, color: colors.muted, letterSpacing: 1 },
   scroll: { flex: 1 },
   scrollInner: { paddingHorizontal: 16, paddingBottom: 36 },
-  empty: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  empty: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, gap: 16 },
   emptyTxt: { color: colors.muted, fontSize: 14, textAlign: 'center', lineHeight: 22 },
+  emptyBtn: { backgroundColor: colors.ink, borderRadius: 12, paddingHorizontal: 22, paddingVertical: 12 },
+  emptyBtnTxt: { color: colors.bg, fontSize: 14, fontWeight: '700' },
+
+  basisCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: colors.panel2, borderRadius: 14, padding: 14,
+    borderWidth: 1, borderColor: colors.line2, marginTop: 8, marginBottom: 10,
+  },
+  basisLabel: { fontSize: 9.5, fontWeight: '800', color: colors.muted, letterSpacing: 1.5 },
+  basisMain: { fontSize: 14, fontWeight: '700', color: colors.ink, marginTop: 5 },
+  basisSub: { fontSize: 11, color: colors.muted, marginTop: 4 },
+  basisChev: { fontSize: 20, color: colors.muted },
+
+  driftBox: {
+    backgroundColor: 'rgba(168,197,160,0.09)', borderRadius: 14, padding: 14,
+    borderWidth: 1, borderColor: 'rgba(168,197,160,0.3)', marginBottom: 10, gap: 10,
+  },
+  driftTxt: { fontSize: 12.5, color: colors.ink, lineHeight: 19 },
+  driftHi: { fontWeight: '800', color: colors.good },
+  driftBtn: {
+    alignSelf: 'flex-start', backgroundColor: colors.ink,
+    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8,
+  },
+  driftBtnTxt: { fontSize: 12, fontWeight: '700', color: colors.bg },
 
   sectionLabel: {
     fontSize: 9.5, fontWeight: '800', color: colors.muted,
     letterSpacing: 2, marginBottom: 12, marginTop: 8,
   },
-  sectionRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 8 },
+  sectionRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 8, flexWrap: 'wrap' },
   sectionSub: { fontSize: 11, color: colors.muted },
 
   macroRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
@@ -136,6 +251,12 @@ const s = StyleSheet.create({
   mboxUnit: { fontSize: 12, fontWeight: '600', color: colors.mid },
   mboxLabel: { fontSize: 10, color: colors.muted, marginTop: 4 },
   tdeeTxt: { fontSize: 11, color: colors.muted, lineHeight: 17, marginBottom: 6 },
+
+  staleBox: {
+    backgroundColor: colors.panel2, borderRadius: 12, padding: 12,
+    borderWidth: 1, borderColor: colors.line2, marginBottom: 10,
+  },
+  staleTxt: { fontSize: 12, color: colors.mid, lineHeight: 18 },
 
   mealCard: {
     flexDirection: 'row', gap: 14,
@@ -163,10 +284,19 @@ const s = StyleSheet.create({
   },
   emptyMealTxt: { color: colors.muted, fontSize: 14, textAlign: 'center', lineHeight: 22 },
 
-  genBtn: { backgroundColor: colors.ink, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginBottom: 12 },
+  genBtn: { backgroundColor: colors.ink, borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
   genGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.line2 },
   genOff: { opacity: 0.4 },
   genTxt: { color: colors.bg, fontSize: 15, fontWeight: '700' },
   genTxtGhost: { color: colors.mid },
-  notice: { fontSize: 10.5, color: colors.muted, lineHeight: 16, textAlign: 'center' },
+
+  linkRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: colors.panel, borderRadius: 14, padding: 14,
+    borderWidth: 1, borderColor: colors.line, marginTop: 12,
+  },
+  linkTitle: { fontSize: 13.5, fontWeight: '700', color: colors.ink },
+  linkSub: { fontSize: 11, color: colors.muted, marginTop: 3 },
+
+  notice: { fontSize: 10.5, color: colors.muted, lineHeight: 16, textAlign: 'center', marginTop: 14 },
 });

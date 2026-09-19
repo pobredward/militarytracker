@@ -1,50 +1,105 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, FlatList,
+  Vibration, Platform, ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../utils/colors';
+import { showAlert } from '../utils/alert';
 import { useAppStore } from '../stores/appStore';
 import { useAuthStore } from '../stores/authStore';
-import { exById, PART_LABEL } from '../data/exercises';
+import { exById, exFilter, Exercise, PART_LABEL } from '../data/exercises';
 import { saveWorkoutLog } from '../services/workoutService';
 import { useCountdown, useElapsed } from '../hooks/useCountdown';
-import { fmtClock } from '../utils/stats';
+import { fmtClock, fmtSetDetail, lastSetsOf, prIdsIn } from '../utils/stats';
 import ExerciseMedia from './ExerciseMedia';
 
 export default function SessionPlayer() {
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const {
-    session, setVal, toggleSet, addSet, removeSet, goToEx, moveEx,
-    stopRest, startRest, finishSession, addLog,
+    session, profile, logs, setVal, toggleSet, addSet, removeSet, goToEx, moveEx,
+    stopRest, startRest, buildLog, closeSession, clearSession, addLog, setSummary,
+    swapExercise, appendExercise, queuePending, dropPending,
   } = useAppStore();
 
   const rest = useCountdown(session?.restEndsAt ?? null);
   const elapsed = useElapsed(session?.startedAt ?? null);
+  const [picker, setPicker] = useState<'swap' | 'add' | null>(null);
+  const [saving, setSaving] = useState(false);
+  const wasResting = useRef(false);
+
+  // 휴식이 끝나는 순간 진동으로 알린다
+  useEffect(() => {
+    if (rest > 0) {
+      wasResting.current = true;
+      return;
+    }
+    if (wasResting.current) {
+      wasResting.current = false;
+      if (Platform.OS !== 'web') Vibration.vibrate([0, 220, 120, 220]);
+    }
+  }, [rest]);
 
   if (!session) return null;
 
   const cur = session.data[session.exIdx];
-  const e = exById(cur.id);
+  const e = cur ? exById(cur.id) : undefined;
+  if (!cur) return null;
+
   const isLast = session.exIdx === session.data.length - 1;
   const doneAll = session.data.every((x) => x.sets.every((t) => t.done));
   const completedSets = cur.sets.filter((t) => t.done).length;
+  const anyRecorded = session.data.some((x) => x.sets.some((t) => t.done));
+  const last = lastSetsOf(logs, cur.id);
 
   async function handleFinish() {
-    if (!user) return;
-    const log = finishSession(user.uid);
+    if (!user || saving) return;
+    const log = buildLog(user.uid);
     if (!log) return;
-    try {
-      const saved = await saveWorkoutLog(log);
-      addLog(saved);
-    } catch {
-      addLog({ ...log, id: `local-${Date.now()}` });
-      Alert.alert('오프라인 저장', '서버 저장에 실패해 기기에만 기록했습니다.');
+
+    // 기록이 하나도 없으면 로그를 남기지 않고 그냥 닫는다
+    if (log.totalSets === 0) {
+      showAlert('운동 취소', '기록된 세트가 없습니다. 이 운동을 저장하지 않고 닫을까요?', [
+        { text: '계속하기', style: 'cancel' },
+        { text: '저장 없이 닫기', style: 'destructive', onPress: () => clearSession() },
+      ]);
+      return;
     }
+
+    setSaving(true);
+    const prIds = prIdsIn(log, logs);
+    let saved = true;
+    try {
+      addLog(await saveWorkoutLog(log));
+    } catch {
+      // 서버 저장 실패 — 기기에 보관해두고 다음 실행에서 재시도한다
+      saved = false;
+      queuePending(log);
+      addLog({ ...log, id: `local-${log.createdAt}` });
+    }
+    setSaving(false);
+    closeSession();
+    setSummary({
+      dayName: log.dayName,
+      totalSets: log.totalSets,
+      totalVolume: log.totalVolume,
+      durationSec: log.durationSec,
+      exercises: log.exercises,
+      prIds: [...new Set(prIds)],
+      saved,
+    });
   }
 
   function handleClose() {
-    Alert.alert('운동 종료', '완료한 세트는 저장됩니다.', [
+    if (!anyRecorded) {
+      showAlert('운동 종료', '기록된 세트가 없습니다. 저장하지 않고 닫을까요?', [
+        { text: '계속하기', style: 'cancel' },
+        { text: '닫기', style: 'destructive', onPress: () => clearSession() },
+      ]);
+      return;
+    }
+    showAlert('운동 종료', '완료한 세트는 저장됩니다.', [
       { text: '취소', style: 'cancel' },
       { text: '종료', style: 'destructive', onPress: handleFinish },
     ]);
@@ -52,9 +107,8 @@ export default function SessionPlayer() {
 
   return (
     <View style={s.root}>
-      {/* Header */}
       <View style={[s.header, { paddingTop: insets.top + 12 }]}>
-        <TouchableOpacity style={s.closeBtn} onPress={handleClose}>
+        <TouchableOpacity style={s.closeBtn} onPress={handleClose} disabled={saving}>
           <Text style={s.closeTxt}>✕</Text>
         </TouchableOpacity>
         <View style={s.headerCenter}>
@@ -72,24 +126,25 @@ export default function SessionPlayer() {
         </View>
       </View>
 
-      {/* Media */}
       <View style={s.mediaArea}>
-        <ExerciseMedia
-          exId={cur.id}
-          autoPlay
-          rounded={24}
-          dim={0.25}
-          style={s.media}
-        />
+        <ExerciseMedia exId={cur.id} autoPlay rounded={24} dim={0.25} style={s.media} />
         <View style={s.mediaMeta}>
           <Text style={s.exName}>{e?.n ?? ''}</Text>
-          <Text style={s.exPart}>
-            {e ? `${PART_LABEL[e.part]} · ${e.g} · 권장 ${e.r}` : ''}
-          </Text>
+          <Text style={s.exPart}>{e ? `${PART_LABEL[e.part]} · ${e.g} · 권장 ${e.r}` : ''}</Text>
+        </View>
+
+        <View style={s.lastRow}>
+          {last ? (
+            <Text style={s.lastTxt} numberOfLines={1}>
+              지난 기록 <Text style={s.lastDate}>{last.date.slice(5)}</Text>{'  '}
+              <Text style={s.lastSets}>{last.detail.map(fmtSetDetail).join('  ')}</Text>
+            </Text>
+          ) : (
+            <Text style={s.lastEmpty}>이 종목의 첫 기록입니다</Text>
+          )}
         </View>
       </View>
 
-      {/* Filmstrip */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -114,9 +169,12 @@ export default function SessionPlayer() {
             </TouchableOpacity>
           );
         })}
+        <TouchableOpacity style={[s.filmCell, s.filmAdd]} onPress={() => setPicker('add')}>
+          <Text style={s.filmAddTxt}>＋</Text>
+          <Text style={s.filmAddLabel}>종목 추가</Text>
+        </TouchableOpacity>
       </ScrollView>
 
-      {/* Bottom sheet */}
       <View style={s.sheet}>
         <View style={s.grab} />
 
@@ -135,36 +193,46 @@ export default function SessionPlayer() {
           </View>
         )}
 
+        <View style={s.sheetHead}>
+          <Text style={s.sheetTitle}>세트 기록 · 길게 눌러 삭제</Text>
+          <TouchableOpacity onPress={() => setPicker('swap')} hitSlop={8}>
+            <Text style={s.swapLink}>종목 교체</Text>
+          </TouchableOpacity>
+        </View>
+
         <ScrollView style={s.setsScroll} contentContainerStyle={s.setsContainer}>
-          {cur.sets.map((st, si) => (
-            <View key={si} style={[s.setRow, st.done && s.setRowDone]}>
-              <Text style={s.setNum}>{si + 1}</Text>
-              <TextInput
-                style={[s.setInput, st.done && s.setInputDone]}
-                placeholder="kg"
-                placeholderTextColor={colors.muted}
-                keyboardType="decimal-pad"
-                value={st.w}
-                onChangeText={(v) => setVal(si, 'w', v)}
-              />
-              <Text style={s.setX}>×</Text>
-              <TextInput
-                style={[s.setInput, st.done && s.setInputDone]}
-                placeholder="회"
-                placeholderTextColor={colors.muted}
-                keyboardType="numeric"
-                value={st.r}
-                onChangeText={(v) => setVal(si, 'r', v)}
-              />
-              <TouchableOpacity
-                style={[s.ck, st.done && s.ckDone]}
-                onPress={() => toggleSet(si)}
-                onLongPress={() => removeSet(si)}
-              >
-                <Text style={[s.ckTxt, st.done && s.ckTxtDone]}>{st.done ? '✓' : '○'}</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
+          {cur.sets.map((st, si) => {
+            const ref = last?.detail[si];
+            return (
+              <View key={si} style={[s.setRow, st.done && s.setRowDone]}>
+                <Text style={s.setNum}>{si + 1}</Text>
+                <TextInput
+                  style={[s.setInput, st.done && s.setInputDone]}
+                  placeholder={ref && ref.w > 0 ? String(ref.w) : 'kg'}
+                  placeholderTextColor={colors.muted}
+                  keyboardType="decimal-pad"
+                  value={st.w}
+                  onChangeText={(v) => setVal(si, 'w', v)}
+                />
+                <Text style={s.setX}>×</Text>
+                <TextInput
+                  style={[s.setInput, st.done && s.setInputDone]}
+                  placeholder={ref ? String(ref.r) : '회'}
+                  placeholderTextColor={colors.muted}
+                  keyboardType="numeric"
+                  value={st.r}
+                  onChangeText={(v) => setVal(si, 'r', v)}
+                />
+                <TouchableOpacity
+                  style={[s.ck, st.done && s.ckDone]}
+                  onPress={() => toggleSet(si)}
+                  onLongPress={() => removeSet(si)}
+                >
+                  <Text style={[s.ckTxt, st.done && s.ckTxtDone]}>{st.done ? '✓' : '○'}</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })}
           <TouchableOpacity style={s.addSet} onPress={addSet}>
             <Text style={s.addSetTxt}>+ 세트 추가</Text>
           </TouchableOpacity>
@@ -179,8 +247,12 @@ export default function SessionPlayer() {
             <Text style={s.navGhostTxt}>← 이전</Text>
           </TouchableOpacity>
           {isLast ? (
-            <TouchableOpacity style={[s.navBtn, s.navSolid]} onPress={handleFinish}>
-              <Text style={s.navSolidTxt}>{doneAll ? '운동 완료 ✓' : '저장하고 종료'}</Text>
+            <TouchableOpacity style={[s.navBtn, s.navSolid]} onPress={handleFinish} disabled={saving}>
+              {saving ? (
+                <ActivityIndicator color={colors.bg} />
+              ) : (
+                <Text style={s.navSolidTxt}>{doneAll ? '운동 완료 ✓' : '저장하고 종료'}</Text>
+              )}
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={[s.navBtn, s.navSolid]} onPress={() => moveEx(1)}>
@@ -189,7 +261,111 @@ export default function SessionPlayer() {
           )}
         </View>
       </View>
+
+      {picker && (
+        <ExercisePicker
+          mode={picker}
+          currentId={cur.id}
+          usedIds={session.data.map((x) => x.id)}
+          place={profile?.env ?? 'gym'}
+          onClose={() => setPicker(null)}
+          onPick={(id) => {
+            if (picker === 'swap') swapExercise(id);
+            else appendExercise(id);
+            setPicker(null);
+          }}
+        />
+      )}
     </View>
+  );
+}
+
+// ─── 종목 선택 시트 ─────────────────────────────────────────────────────────
+function ExercisePicker({
+  mode, currentId, usedIds, place, onClose, onPick,
+}: {
+  mode: 'swap' | 'add';
+  currentId: string;
+  usedIds: string[];
+  place: 'gym' | 'home';
+  onClose: () => void;
+  onPick: (id: string) => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const cur = exById(currentId);
+  const [sameOnly, setSameOnly] = useState(mode === 'swap');
+  const [q, setQ] = useState('');
+
+  const list = useMemo(() => {
+    const keyword = q.trim();
+    return exFilter({ place, ...(sameOnly && cur ? { part: cur.part } : {}) })
+      // 이미 세션에 들어있는 종목은 제외 — 중복되면 기록이 뭉개진다
+      .filter((x) => (mode === 'swap' ? x.id !== currentId : true) && !usedIds.includes(x.id))
+      .filter((x) => !keyword || x.n.includes(keyword) || x.g.includes(keyword));
+  }, [place, sameOnly, cur, q, usedIds, mode, currentId]);
+
+  return (
+    <View style={[p.root, { paddingTop: insets.top + 16 }]}>
+      <View style={p.head}>
+        <View style={{ flex: 1 }}>
+          <Text style={p.title}>{mode === 'swap' ? '종목 교체' : '종목 추가'}</Text>
+          <Text style={p.sub}>
+            {mode === 'swap' && cur ? `${cur.n} → 다른 종목으로` : '세션 맨 뒤에 추가됩니다'}
+          </Text>
+        </View>
+        <TouchableOpacity style={p.close} onPress={onClose}>
+          <Text style={p.closeTxt}>✕</Text>
+        </TouchableOpacity>
+      </View>
+
+      <TextInput
+        style={p.search}
+        placeholder="종목 검색"
+        placeholderTextColor={colors.muted}
+        value={q}
+        onChangeText={setQ}
+        autoCorrect={false}
+      />
+
+      {cur && (
+        <View style={p.filterRow}>
+          <TouchableOpacity style={[p.chip, sameOnly && p.chipOn]} onPress={() => setSameOnly(true)}>
+            <Text style={[p.chipTxt, sameOnly && p.chipTxtOn]}>
+              같은 부위 ({PART_LABEL[cur.part]})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[p.chip, !sameOnly && p.chipOn]} onPress={() => setSameOnly(false)}>
+            <Text style={[p.chipTxt, !sameOnly && p.chipTxtOn]}>전체</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <FlatList
+        data={list}
+        keyExtractor={(x) => x.id}
+        contentContainerStyle={p.listInner}
+        showsVerticalScrollIndicator={false}
+        initialNumToRender={12}
+        maxToRenderPerBatch={12}
+        windowSize={7}
+        keyboardShouldPersistTaps="handled"
+        ListEmptyComponent={<Text style={p.empty}>조건에 맞는 종목이 없습니다.</Text>}
+        renderItem={({ item }) => <PickerRow ex={item} onPick={() => onPick(item.id)} />}
+      />
+    </View>
+  );
+}
+
+function PickerRow({ ex, onPick }: { ex: Exercise; onPick: () => void }) {
+  return (
+    <TouchableOpacity style={p.row} activeOpacity={0.75} onPress={onPick}>
+      <ExerciseMedia exId={ex.id} rounded={10} style={p.thumb} dim={0.3} />
+      <View style={{ flex: 1 }}>
+        <Text style={p.name}>{ex.n}</Text>
+        <Text style={p.meta}>{PART_LABEL[ex.part]} · {ex.g} · {ex.s}세트 {ex.r}</Text>
+      </View>
+      <Text style={p.pick}>선택</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -214,11 +390,19 @@ const s = StyleSheet.create({
   restTimer: { fontSize: 18, fontWeight: '800', color: colors.ink },
   setsProgress: { fontSize: 14, fontWeight: '700', color: colors.mid },
 
-  mediaArea: { flex: 1, paddingHorizontal: 20, justifyContent: 'center', gap: 14 },
-  media: { width: '100%', aspectRatio: 1, maxHeight: 300, alignSelf: 'center' },
+  mediaArea: { flex: 1, paddingHorizontal: 20, justifyContent: 'center', gap: 12 },
+  media: { width: '100%', aspectRatio: 1, maxHeight: 260, alignSelf: 'center' },
   mediaMeta: { alignItems: 'center' },
-  exName: { fontSize: 22, fontWeight: '800', color: colors.ink, textAlign: 'center', letterSpacing: -0.3 },
+  exName: { fontSize: 21, fontWeight: '800', color: colors.ink, textAlign: 'center', letterSpacing: -0.3 },
   exPart: { fontSize: 12, color: colors.muted, marginTop: 4, textAlign: 'center' },
+  lastRow: {
+    backgroundColor: colors.panel2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10,
+    borderWidth: 1, borderColor: colors.line,
+  },
+  lastTxt: { fontSize: 12, color: colors.muted, textAlign: 'center' },
+  lastDate: { color: colors.mid },
+  lastSets: { color: colors.ink, fontWeight: '700' },
+  lastEmpty: { fontSize: 12, color: colors.muted, textAlign: 'center' },
 
   filmScroll: { flexGrow: 0 },
   filmContent: { paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
@@ -234,6 +418,9 @@ const s = StyleSheet.create({
   filmName: { fontSize: 10, color: colors.muted, textAlign: 'center', lineHeight: 13 },
   filmNameActive: { color: colors.ink },
   filmCheck: { fontSize: 11, color: colors.mid, marginTop: 4 },
+  filmAdd: { borderStyle: 'dashed', justifyContent: 'center' },
+  filmAddTxt: { fontSize: 17, color: colors.muted, marginBottom: 2 },
+  filmAddLabel: { fontSize: 9.5, color: colors.muted },
 
   sheet: {
     backgroundColor: colors.panel, borderTopWidth: 1, borderTopColor: colors.line2,
@@ -244,6 +431,10 @@ const s = StyleSheet.create({
     width: 40, height: 4, borderRadius: 2,
     backgroundColor: colors.line2, alignSelf: 'center', marginBottom: 12,
   },
+  sheetHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  sheetTitle: { fontSize: 10.5, fontWeight: '700', color: colors.muted, letterSpacing: 0.8 },
+  swapLink: { fontSize: 12, color: colors.mid, fontWeight: '600' },
+
   restBox: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     backgroundColor: colors.panel2, borderWidth: 1, borderColor: colors.line2,
@@ -290,4 +481,45 @@ const s = StyleSheet.create({
   navSolid: { backgroundColor: colors.ink },
   navSolidTxt: { color: colors.bg, fontSize: 14, fontWeight: '700' },
   navOff: { opacity: 0.3 },
+});
+
+const p = StyleSheet.create({
+  root: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: colors.bg, zIndex: 60,
+  },
+  head: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, gap: 12 },
+  title: { fontSize: 20, fontWeight: '800', color: colors.ink },
+  sub: { fontSize: 12, color: colors.muted, marginTop: 3 },
+  close: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: colors.panel2, alignItems: 'center', justifyContent: 'center',
+  },
+  closeTxt: { fontSize: 15, color: colors.mid },
+  search: {
+    marginHorizontal: 20, marginTop: 14,
+    backgroundColor: colors.panel2, borderWidth: 1, borderColor: colors.line2,
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11,
+    fontSize: 14, color: colors.ink,
+  },
+  filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, marginTop: 12 },
+  chip: {
+    backgroundColor: colors.panel2, borderRadius: 20,
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderWidth: 1, borderColor: colors.line,
+  },
+  chipOn: { backgroundColor: colors.ink, borderColor: colors.ink },
+  chipTxt: { fontSize: 12, fontWeight: '600', color: colors.muted },
+  chipTxtOn: { color: colors.bg },
+  listInner: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 40 },
+  empty: { color: colors.muted, fontSize: 13, textAlign: 'center', marginTop: 30 },
+  row: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: colors.panel, borderRadius: 14, padding: 10,
+    borderWidth: 1, borderColor: colors.line, marginBottom: 8,
+  },
+  thumb: { width: 48, height: 48 },
+  name: { fontSize: 14, fontWeight: '600', color: colors.ink },
+  meta: { fontSize: 10.5, color: colors.muted, marginTop: 2 },
+  pick: { fontSize: 12, color: colors.mid, fontWeight: '700' },
 });

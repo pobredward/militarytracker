@@ -38,7 +38,6 @@ export interface UserProfile {
 
 // ─── Plan ──────────────────────────────────────────────────────────────────
 export interface PlanDay {
-  /** 루틴 프리셋에서 온 경우 RoutineDay.id, 자동 생성이면 슬러그 */
   id: string;
   name: string;
   focus: string;
@@ -46,7 +45,6 @@ export interface PlanDay {
 }
 
 export interface Plan {
-  /** 프리셋 루틴에서 시작한 경우의 루틴 id */
   routineId?: string | null;
   days: PlanDay[];
   planSrc: 'AI' | 'LOCAL' | 'PRESET';
@@ -66,12 +64,22 @@ export interface ExerciseSession {
   sets: SetRecord[];
 }
 
+/** 완료된 한 세트의 실제 수치 */
+export interface SetDetail {
+  w: number;
+  r: number;
+}
+
 export interface LoggedExercise {
   id: string;
   /** 완료한 세트 수 */
   sets: number;
   /** Σ(무게 × 반복) — 맨몸/시간 종목은 0 */
   volume: number;
+  /** 완료 세트별 수치 — 다음 세션에서 "지난 기록"으로 보여준다 */
+  detail?: SetDetail[];
+  /** 그날의 최고 세트 (추정 1RM 기준) */
+  best?: SetDetail;
 }
 
 export interface WorkoutLog {
@@ -79,15 +87,25 @@ export interface WorkoutLog {
   userId: string;
   /** YYYY-MM-DD (로컬 기준) */
   date: string;
-  /** 플랜 내 몇 번째 데이였는지 — 다음 데이 계산에 사용 */
   dayIdx: number;
   dayName: string;
   exercises: LoggedExercise[];
   totalSets: number;
   totalVolume: number;
-  /** 운동 소요 시간(초) */
   durationSec: number;
   createdAt: string;
+}
+
+/** 운동 완료 직후 보여줄 요약 */
+export interface SessionSummary {
+  dayName: string;
+  totalSets: number;
+  totalVolume: number;
+  durationSec: number;
+  exercises: LoggedExercise[];
+  /** 개인 기록을 갱신한 종목 id 목록 */
+  prIds: string[];
+  saved: boolean;
 }
 
 // ─── Weight ────────────────────────────────────────────────────────────────
@@ -110,6 +128,8 @@ export interface DietPlan {
   meals: MealItem[];
   tip: string;
   src?: 'AI' | 'LOCAL';
+  /** 생성 시점 — 오래된 식단인지 표시하는 데 사용 */
+  createdAt?: string;
 }
 
 // ─── Body Stats (computed) ────────────────────────────────────────────────
@@ -122,6 +142,10 @@ export interface BodyStats {
   protein: number;
   fat: number;
   carb: number;
+  /** 실제 계산에 사용한 체중 */
+  weightUsed: number;
+  /** trend = 최근 체중 기록의 추세값, profile = 저장된 기준 체중 */
+  weightSrc: 'trend' | 'profile';
 }
 
 // ─── Report ────────────────────────────────────────────────────────────────

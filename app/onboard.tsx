@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  ActivityIndicator, Alert,
-} from 'react-native';
+  ActivityIndicator, } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors } from '../src/utils/colors';
+import { showAlert } from '../src/utils/alert';
 import { UserProfile } from '../src/types';
 import { useAuthStore } from '../src/stores/authStore';
 import { useAppStore } from '../src/stores/appStore';
@@ -49,7 +49,7 @@ export default function OnboardScreen() {
       patchUser({ onboardingDone: true, profile: p });
       router.replace(`/routine/${routineId}?onboard=1`);
     } catch {
-      Alert.alert('오류', '루틴 저장에 실패했습니다. 다시 시도해주세요.');
+      showAlert('오류', '루틴 저장에 실패했습니다. 다시 시도해주세요.');
     } finally {
       setLoading(null);
     }
@@ -66,7 +66,7 @@ export default function OnboardScreen() {
       patchUser({ onboardingDone: true, profile: p });
       router.replace('/tabs/home');
     } catch {
-      Alert.alert('오류', '플랜 생성에 실패했습니다. 다시 시도해주세요.');
+      showAlert('오류', '플랜 생성에 실패했습니다. 다시 시도해주세요.');
     } finally {
       setLoading(null);
     }

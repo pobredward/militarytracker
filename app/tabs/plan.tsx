@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert,
-} from 'react-native';
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors } from '../../src/utils/colors';
+import { showAlert } from '../../src/utils/alert';
 import { useAppStore } from '../../src/stores/appStore';
 import { useAuthStore } from '../../src/stores/authStore';
 import { exById, EQUIP_LABEL, PART_LABEL } from '../../src/data/exercises';
@@ -12,7 +12,6 @@ import { routineById } from '../../src/data/routines';
 import { savePlan } from '../../src/services/authService';
 import { generatePlan } from '../../src/services/aiService';
 import { buildLocalPlan } from '../../src/utils/planner';
-import SessionPlayer from '../../src/components/SessionPlayer';
 import ExerciseMedia from '../../src/components/ExerciseMedia';
 import { PrimaryBtn, GhostBtn, Notice } from '../../src/components/ui';
 
@@ -21,13 +20,18 @@ const SRC_LABEL: Record<string, string> = { AI: 'AI 구성', LOCAL: '자동 구�
 export default function PlanScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const { plan, profile, session, startSession, setPlan } = useAppStore();
+  const { plan, profile, startSession, setPlan } = useAppStore();
   const [activeDay, setActiveDay] = useState(0);
   const [busy, setBusy] = useState<'ai' | 'local' | null>(null);
 
+  // 다른 화면에서 루틴을 바꾸면 선택된 데이가 범위를 벗어날 수 있다
+  useEffect(() => {
+    if (plan && activeDay > plan.days.length - 1) setActiveDay(0);
+  }, [plan]);
+
   async function regenerate(mode: 'ai' | 'local') {
     if (!profile || !user) {
-      Alert.alert('알림', '신체 정보가 없습니다. MY 탭에서 온보딩 정보를 확인해주세요.');
+      showAlert('알림', '신체 정보가 없습니다. MY 탭에서 온보딩 정보를 확인해주세요.');
       return;
     }
     setBusy(mode);
@@ -38,10 +42,10 @@ export default function PlanScreen() {
       setPlan(next);
       setActiveDay(0);
       if (mode === 'ai' && next.planSrc !== 'AI') {
-        Alert.alert('자동 구성으로 대체', 'AI 서버에 연결하지 못해 자동 알고리즘으로 구성했습니다.');
+        showAlert('자동 구성으로 대체', 'AI 서버에 연결하지 못해 자동 알고리즘으로 구성했습니다.');
       }
     } catch {
-      Alert.alert('오류', '플랜 재생성에 실패했습니다.');
+      showAlert('오류', '플랜 재생성에 실패했습니다.');
     } finally {
       setBusy(null);
     }
@@ -60,7 +64,8 @@ export default function PlanScreen() {
     );
   }
 
-  const day = plan.days[Math.min(activeDay, plan.days.length - 1)];
+  const dayIdx = Math.min(activeDay, plan.days.length - 1);
+  const day = plan.days[dayIdx];
   const routine = plan.routineId ? routineById(plan.routineId) : null;
 
   return (
@@ -103,7 +108,7 @@ export default function PlanScreen() {
             <Text style={s.dayName}>{day.name}</Text>
             <Text style={s.dayFocus}>{day.focus}</Text>
           </View>
-          <TouchableOpacity style={s.startBtn} onPress={() => startSession(activeDay)}>
+          <TouchableOpacity style={s.startBtn} onPress={() => startSession(dayIdx)}>
             <Text style={s.startBtnTxt}>▶  시작</Text>
           </TouchableOpacity>
         </View>
@@ -156,7 +161,6 @@ export default function PlanScreen() {
         <Notice>일반적인 운동 가이드입니다. 통증이나 질환이 있다면 전문가와 상담하세요.</Notice>
       </ScrollView>
 
-      {session && <SessionPlayer />}
     </SafeAreaView>
   );
 }

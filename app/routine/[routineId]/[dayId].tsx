@@ -49,8 +49,7 @@ export default function RoutineDayScreen() {
           <PrimaryBtn
             label="▶  이 데이 운동 시작"
             onPress={() => {
-              startSession(planDayIdx);
-              router.replace('/tabs/home');
+              if (startSession(planDayIdx)) router.replace('/tabs/home');
             }}
             style={{ marginBottom: 14 }}
           />

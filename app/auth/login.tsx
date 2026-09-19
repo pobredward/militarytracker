@@ -8,13 +8,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert,
+  
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Link } from 'expo-router';
-import { signInWithEmail } from '../../src/services/authService';
+import { signInWithEmail, resetPassword } from '../../src/services/authService';
 import { colors } from '../../src/utils/colors';
+import { showAlert } from '../../src/utils/alert';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -24,7 +25,7 @@ export default function LoginScreen() {
 
   async function handleLogin() {
     if (!email.trim() || !password.trim()) {
-      Alert.alert('입력 오류', '이메일과 비밀번호를 모두 입력해주세요.');
+      showAlert('입력 오류', '이메일과 비밀번호를 모두 입력해주세요.');
       return;
     }
     setLoading(true);
@@ -37,9 +38,28 @@ export default function LoginScreen() {
           : e.code === 'auth/invalid-email'
           ? '올바른 이메일 형식이 아닙니다.'
           : '로그인에 실패했습니다. 다시 시도해주세요.';
-      Alert.alert('로그인 실패', msg);
+      showAlert('로그인 실패', msg);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleReset() {
+    const target = email.trim();
+    if (!target) {
+      showAlert('이메일 입력', '가입하신 이메일을 먼저 입력해주세요.');
+      return;
+    }
+    try {
+      await resetPassword(target);
+      showAlert('메일 발송', `${target} 으로 비밀번호 재설정 링크를 보냈습니다.\n메일함을 확인해주세요.`);
+    } catch (e: any) {
+      showAlert(
+        '발송 실패',
+        e?.code === 'auth/invalid-email'
+          ? '올바른 이메일 형식이 아닙니다.'
+          : '메일 발송에 실패했습니다. 잠시 후 다시 시도해주세요.'
+      );
     }
   }
 
@@ -76,6 +96,10 @@ export default function LoginScreen() {
 
           <TouchableOpacity style={[s.btn, loading && s.btnOff]} onPress={handleLogin} disabled={loading}>
             {loading ? <ActivityIndicator color={colors.bg} /> : <Text style={s.btnTxt}>로그인</Text>}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={s.resetBtn} onPress={handleReset}>
+            <Text style={s.resetTxt}>비밀번호를 잊으셨나요?</Text>
           </TouchableOpacity>
 
           <View style={s.footer}>
@@ -119,6 +143,8 @@ const s = StyleSheet.create({
     marginTop: 24,
   },
   btnOff: { opacity: 0.4 },
+  resetBtn: { alignItems: 'center', paddingVertical: 14 },
+  resetTxt: { color: colors.muted, fontSize: 12.5 },
   btnTxt: { color: colors.bg, fontSize: 15, fontWeight: '700' },
   footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 24 },
   footerTxt: { color: colors.muted, fontSize: 13 },

@@ -268,14 +268,6 @@ export const exByIds = (ids: string[]): Exercise[] =>
 
 export const exByPart = (part: Part): Exercise[] => EX.filter((e) => e.part === part);
 
-export const exByPPL = (ppl: PPL): Exercise[] => EX.filter((e) => e.ppl === ppl);
-
-export function exSearch(keyword: string): Exercise[] {
-  const k = keyword.trim();
-  if (!k) return EX;
-  return EX.filter((e) => e.n.includes(k) || e.g.includes(k) || e.id.includes(k.toLowerCase()));
-}
-
 /** 장소·난이도 조건으로 필터 */
 export function exFilter(opts: { place?: Place; maxLevel?: 1 | 2 | 3; part?: Part; ppl?: PPL }): Exercise[] {
   return EX.filter((e) => {
@@ -287,5 +279,3 @@ export function exFilter(opts: { place?: Place; maxLevel?: 1 | 2 | 3; part?: Par
   });
 }
 
-export const EX_COUNT = EX.length;
-export const partCount = (part: Part): number => exByPart(part).length;

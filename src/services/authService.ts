@@ -3,13 +3,12 @@ import {
   signInWithEmailAndPassword,
   signOut,
   updateProfile,
-  GoogleAuthProvider,
-  signInWithCredential,
   deleteUser,
   onAuthStateChanged,
+  sendPasswordResetEmail,
   User as FirebaseUser,
 } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, writeBatch } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { User, UserProfile, Plan } from '../types';
 import { deleteAllUserData } from './workoutService';
@@ -65,26 +64,9 @@ export async function signInWithEmail(email: string, password: string): Promise<
   );
 }
 
-export async function signInWithGoogle(idToken: string): Promise<User> {
-  const googleCredential = GoogleAuthProvider.credential(idToken);
-  const { user } = await signInWithCredential(auth, googleCredential);
-
-  const userRef = doc(db, 'users', user.uid);
-  const userSnap = await getDoc(userRef);
-
-  if (!userSnap.exists()) {
-    const userData = baseUserDoc({
-      email: user.email,
-      displayName: user.displayName,
-      photoURL: user.photoURL,
-      authProvider: 'google',
-    });
-    await setDoc(userRef, userData);
-    return { uid: user.uid, ...userData };
-  }
-
-  await setDoc(userRef, { lastLoginAt: nowIso() }, { merge: true });
-  return normalizeUser(user.uid, userSnap.data());
+/** 비밀번호 재설정 메일 발송. 존재하지 않는 계정도 동일하게 처리(계정 존재 여부 노출 방지) */
+export async function resetPassword(email: string): Promise<void> {
+  await sendPasswordResetEmail(auth, email);
 }
 
 export async function logout(): Promise<void> {
@@ -113,23 +95,37 @@ export async function fetchUserProfile(uid: string): Promise<User | null> {
   return normalizeUser(uid, snap.data());
 }
 
-export const isAdmin = (user: User | null): boolean => user?.role === 'admin';
-
 /** 계정 + 하위 데이터 전체 삭제. 재인증이 필요하면 코드를 그대로 throw */
 export async function deleteAccount(): Promise<void> {
   const user = auth.currentUser;
   if (!user) return;
+
+  // Firebase 는 최근 로그인(약 5분)을 요구한다.
+  // 데이터를 먼저 지우면 deleteUser 가 실패했을 때 계정만 남고 기록은 사라진다.
+  // 따라서 조건을 먼저 확인하고, 통과할 때만 삭제를 시작한다.
+  const lastSignIn = user.metadata.lastSignInTime
+    ? new Date(user.metadata.lastSignInTime).getTime()
+    : 0;
+  if (Date.now() - lastSignIn > 4 * 60 * 1000) {
+    const err = new Error('requires recent login') as Error & { code: string };
+    err.code = 'auth/requires-recent-login';
+    throw err;
+  }
+
   await deleteAllUserData(user.uid);
-  await deleteUser(user); // auth/requires-recent-login 가능
+  await deleteUser(user);
 }
 
+/** 프로필·플랜을 한 번에 기록 — 중간에 끊겨 '온보딩 완료인데 플랜 없음' 상태가 되지 않도록 */
 export async function saveOnboarding(
   uid: string,
   profile: UserProfile,
   plan: Plan
 ): Promise<void> {
-  await setDoc(doc(db, 'users', uid), { profile, onboardingDone: true }, { merge: true });
-  await savePlan(uid, plan);
+  const batch = writeBatch(db);
+  batch.set(doc(db, 'users', uid), { profile, onboardingDone: true }, { merge: true });
+  batch.set(doc(db, 'plans', uid), { ...plan, updatedAt: nowIso() });
+  await batch.commit();
 }
 
 export async function savePlan(uid: string, plan: Plan): Promise<void> {

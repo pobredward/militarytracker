@@ -35,12 +35,6 @@ export function planFromRoutine(routineId: string): Plan | null {
   };
 }
 
-/** 온보딩 응답에 맞는 추천 루틴을 그대로 플랜으로 사용 */
-export function buildPresetPlan(p: UserProfile): Plan {
-  const r = recommendRoutine({ place: p.env, days: p.days, level: p.level });
-  return planFromRoutine(r.id)!;
-}
-
 // ─── 자동 생성 플랜 (AI 실패 시 폴백 / 다시 생성) ──────────────────────────
 type DaySpec = { id: string; name: string; focus: string; parts: Part[] };
 
@@ -153,12 +147,16 @@ export function planFromAI(
  * 존재하지 않는 종목 id 도 함께 걸러낸다.
  */
 export function normalizePlan(plan: Plan | null | undefined): Plan | null {
-  if (!plan || !Array.isArray(plan.days) || plan.days.length === 0) return plan ?? null;
-  const days: PlanDay[] = plan.days.map((d, i) => ({
-    id: d?.id || `day${i + 1}`,
-    name: d?.name || `Day ${i + 1}`,
-    focus: d?.focus || '',
-    ids: Array.isArray(d?.ids) ? d.ids.filter((x) => !!exById(x)) : [],
-  }));
+  if (!plan || !Array.isArray(plan.days) || plan.days.length === 0) return null;
+  const days: PlanDay[] = plan.days
+    .map((d, i) => ({
+      id: d?.id || `day${i + 1}`,
+      name: d?.name || `Day ${i + 1}`,
+      focus: d?.focus || '',
+      ids: Array.isArray(d?.ids) ? d.ids.filter((x) => !!exById(x)) : [],
+    }))
+    // 종목이 하나도 남지 않은 데이는 버린다 — 화면에서 undefined 참조를 만든다
+    .filter((d) => d.ids.length > 0);
+  if (!days.length) return null;
   return { ...plan, days };
 }

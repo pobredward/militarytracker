@@ -99,14 +99,8 @@ export const EX_IMAGE: Record<string, number> = {
 };
 
 export const hasVideo = (id: string): boolean => id in EX_VIDEO;
-export const hasImage = (id: string): boolean => id in EX_IMAGE;
 export const getVideo = (id: string): number | undefined => EX_VIDEO[id];
 export const getImage = (id: string): number | undefined => EX_IMAGE[id];
 
 export const VIDEO_COUNT = Object.keys(EX_VIDEO).length;
-export const IMAGE_COUNT = Object.keys(EX_IMAGE).length;
 
-/** 미디어가 하나도 없는 종목 id 목록 */
-export function missingMedia(ids: string[]): string[] {
-  return ids.filter((id) => !hasVideo(id) && !hasImage(id));
-}

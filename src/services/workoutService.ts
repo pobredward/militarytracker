@@ -11,7 +11,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { WorkoutLog, WeightRecord } from '../types';
+import { WorkoutLog, WeightRecord, SetDetail } from '../types';
 
 const nowIso = () => new Date().toISOString();
 
@@ -40,14 +40,32 @@ export async function getWorkoutLogs(userId: string, limitCount = 60): Promise<W
   return snap.docs.map((d) => normalizeLog(d.id, d.data()));
 }
 
-/** 구버전 문서(dayIdx·totalSets 없음) 대비 정규화 */
-function normalizeLog(id: string, data: Record<string, unknown>): WorkoutLog {
+const sanitizeDetail = (v: unknown): SetDetail[] | undefined => {
+  if (!Array.isArray(v)) return undefined;
+  const list = v
+    .filter((x): x is SetDetail => !!x && typeof x === 'object')
+    .map((x) => ({ w: Number(x.w) || 0, r: Number(x.r) || 0 }));
+  return list.length ? list : undefined;
+};
+
+/** 구버전 문서(dayIdx·totalSets·detail 없음) 대비 정규화 */
+export function normalizeLog(id: string, data: Record<string, unknown>): WorkoutLog {
   const d = data as Partial<WorkoutLog>;
-  const exercises = (d.exercises ?? []).map((x) => ({
-    id: x.id,
-    sets: x.sets ?? 0,
-    volume: x.volume ?? 0,
-  }));
+  const exercises = (d.exercises ?? []).map((x) => {
+    const detail = sanitizeDetail(x.detail);
+    const best =
+      x.best && Number(x.best.w) > 0 && Number(x.best.r) > 0
+        ? { w: Number(x.best.w), r: Number(x.best.r) }
+        : undefined;
+    return {
+      id: x.id,
+      sets: x.sets ?? 0,
+      volume: x.volume ?? 0,
+      // 세트별 수치는 '지난 기록'·개인기록 판정의 근거라 반드시 보존한다
+      ...(detail ? { detail } : {}),
+      ...(best ? { best } : {}),
+    };
+  });
   return {
     id,
     userId: d.userId ?? '',
@@ -85,13 +103,8 @@ export async function getWeights(userId: string, limitCount = 30): Promise<Weigh
   return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WeightRecord, 'id'>) }));
 }
 
-export async function deleteWeight(id: string): Promise<void> {
-  await deleteDoc(doc(db, 'weights', id));
-}
-
 // ─── Cascade delete ───────────────────────────────────────────────────────
 async function deleteByUser(col: 'workoutLogs' | 'weights', userId: string): Promise<void> {
-  // 배치 한도 500 — 나눠서 커밋
   for (;;) {
     const snap = await getDocs(
       query(collection(db, col), where('userId', '==', userId), fsLimit(400))
@@ -104,11 +117,14 @@ async function deleteByUser(col: 'workoutLogs' | 'weights', userId: string): Pro
   }
 }
 
-/** 계정 삭제 시 users/plans/workoutLogs/weights 전부 정리 */
+/**
+ * 계정 삭제 시 하위 데이터 정리.
+ * 순차 실행한다 — 중간에 실패하면 users 문서가 남아 재시도가 가능해야 하므로
+ * users/{uid} 는 가장 마지막에 지운다.
+ */
 export async function deleteAllUserData(userId: string): Promise<void> {
-  await Promise.all([deleteByUser('workoutLogs', userId), deleteByUser('weights', userId)]);
-  const batch = writeBatch(db);
-  batch.delete(doc(db, 'plans', userId));
-  batch.delete(doc(db, 'users', userId));
-  await batch.commit();
+  await deleteByUser('workoutLogs', userId);
+  await deleteByUser('weights', userId);
+  await deleteDoc(doc(db, 'plans', userId));
+  await deleteDoc(doc(db, 'users', userId));
 }

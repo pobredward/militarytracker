@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors } from '../../../src/utils/colors';
+import { showAlert } from '../../../src/utils/alert';
 import { Screen, TopBar, Body, SectionLabel, PrimaryBtn, EmptyState } from '../../../src/components/ui';
 import ExerciseMedia from '../../../src/components/ExerciseMedia';
 import { routineById, routineExCount } from '../../../src/data/routines';
@@ -39,9 +40,9 @@ export default function RoutineDetailScreen() {
       if (!next) throw new Error('invalid');
       await savePlan(user.uid, next);
       setPlan(next);
-      Alert.alert('적용 완료', `${routine.name} 루틴이 내 플랜으로 설정되었습니다.`);
+      showAlert('적용 완료', `${routine.name} 루틴이 내 플랜으로 설정되었습니다.`);
     } catch {
-      Alert.alert('오류', '루틴 적용에 실패했습니다.');
+      showAlert('오류', '루틴 적용에 실패했습니다.');
     } finally {
       setApplying(false);
     }

@@ -48,17 +48,6 @@ export function SectionLabel({ children, style }: { children: ReactNode; style?:
   return <Text style={[s.sectionLabel, style]}>{children}</Text>;
 }
 
-export function Pill({
-  label, sub, active, onPress,
-}: { label: string; sub?: string; active: boolean; onPress: () => void }) {
-  return (
-    <TouchableOpacity style={[s.pill, active && s.pillOn]} onPress={onPress}>
-      <Text style={[s.pillTxt, active && s.pillTxtOn]}>{label}</Text>
-      {sub ? <Text style={[s.pillSub, active && s.pillSubOn]}>{sub}</Text> : null}
-    </TouchableOpacity>
-  );
-}
-
 export function PrimaryBtn({
   label, onPress, loading, disabled, style,
 }: { label: string; onPress: () => void; loading?: boolean; disabled?: boolean; style?: StyleProp<ViewStyle> }) {
