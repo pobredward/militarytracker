@@ -14,7 +14,7 @@ const DOW = ['월', '화', '수', '목', '금', '토', '일'];
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { plan, logs, startSession } = useAppStore();
+  const { plan, profile, logs, startSession } = useAppStore();
 
   const today = new Date().toLocaleDateString('ko-KR', {
     month: '2-digit', day: '2-digit', weekday: 'short',
@@ -38,6 +38,10 @@ export default function HomeScreen() {
   const streak = weekStreak(logs);
   const streakDays = currentStreakDays(logs);
   const weekSets = totalSets(logs, { weekOnly: true });
+  // 이번 주 운동 횟수를 목표 일수와 대비해 보여준다
+  const weekDone = streak.filter(Boolean).length;
+  const weekGoal = profile?.days ?? 3;
+  const goalPct = Math.min(100, Math.round((weekDone / weekGoal) * 100));
 
   const lastLog = logs[0];
   const comment = lastLog
@@ -86,10 +90,21 @@ export default function HomeScreen() {
         <View style={s.card}>
           <View style={s.cardHead}>
             <Text style={s.sectionLabel}>THIS WEEK</Text>
-            <Text style={s.cardMeta}>
-              {weekSets}세트{streakDays > 0 ? ` · ${streakDays}일 연속` : ''}
-            </Text>
+            <Text style={s.cardMeta}>{weekSets}세트</Text>
           </View>
+
+          <View style={s.goalRow}>
+            <Text style={s.goalTxt}>
+              <Text style={s.goalNum}>{weekDone}</Text>
+              <Text style={s.goalSlash}> / {weekGoal}일</Text>
+              {weekDone >= weekGoal ? <Text style={s.goalDone}>  목표 달성</Text> : null}
+            </Text>
+            {streakDays > 1 && <Text style={s.goalStreak}>{streakDays}일 연속</Text>}
+          </View>
+          <View style={s.goalBar}>
+            <View style={[s.goalFill, { width: `${goalPct}%` }]} />
+          </View>
+
           <View style={s.streakRow}>
             {DOW.map((d, i) => (
               <View key={i} style={[s.streakCell, streak[i] && s.streakOn]}>
@@ -184,6 +199,17 @@ const s = StyleSheet.create({
     fontSize: 9.5, fontWeight: '800', color: colors.muted,
     letterSpacing: 2, marginBottom: 14,
   },
+  goalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 },
+  goalTxt: { fontSize: 13, color: colors.muted },
+  goalNum: { fontSize: 20, fontWeight: '800', color: colors.ink },
+  goalSlash: { fontSize: 13, color: colors.muted },
+  goalDone: { fontSize: 11.5, color: colors.good, fontWeight: '700' },
+  goalStreak: { fontSize: 11.5, color: colors.mid, fontWeight: '600' },
+  goalBar: {
+    height: 4, borderRadius: 3, backgroundColor: colors.panel3,
+    overflow: 'hidden', marginBottom: 14,
+  },
+  goalFill: { height: '100%', borderRadius: 3, backgroundColor: colors.ink },
   streakRow: { flexDirection: 'row', gap: 5 },
   streakCell: {
     flex: 1, aspectRatio: 1, borderRadius: 8,

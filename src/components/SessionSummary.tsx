@@ -85,10 +85,10 @@ export default function SessionSummary() {
           style={s.ghost}
           onPress={() => {
             setSummary(null);
-            router.push('/history');
+            router.push(summary.prIds.length ? '/history/records' : '/history');
           }}
         >
-          <Text style={s.ghostTxt}>기록 전체 보기</Text>
+          <Text style={s.ghostTxt}>{summary.prIds.length ? '개인 기록 보기' : '기록 전체 보기'}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={s.primary} onPress={() => setSummary(null)}>
           <Text style={s.primaryTxt}>확인</Text>

@@ -43,7 +43,15 @@ export default function HistoryScreen() {
 
   return (
     <Screen>
-      <TopBar title="운동 기록" meta={`${logs.length}회`} onBack={() => router.back()} />
+      <TopBar
+        title="운동 기록"
+        onBack={() => router.back()}
+        right={
+          <TouchableOpacity onPress={() => router.push('/history/records')} hitSlop={8}>
+            <Text style={s.prLink}>개인 기록 ›</Text>
+          </TouchableOpacity>
+        }
+      />
 
       <View style={s.summaryRow}>
         <Summary value={`${logs.length}`} label="총 운동" />
@@ -130,6 +138,7 @@ function Summary({ value, label }: { value: string; label: string }) {
 }
 
 const s = StyleSheet.create({
+  prLink: { fontSize: 12, color: colors.mid, fontWeight: '600' },
   summaryRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingBottom: 6 },
   summary: {
     flex: 1, backgroundColor: colors.panel2, borderRadius: 14, padding: 14,

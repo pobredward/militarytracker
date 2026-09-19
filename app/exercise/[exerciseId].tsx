@@ -8,7 +8,7 @@ import { formByExId } from '../../src/data/formCheck';
 import { hasVideo } from '../../src/data/media';
 import { rirFor, RISK_NOTE, ROM_NOTE } from '../../src/data/coaching';
 import { useAppStore } from '../../src/stores/appStore';
-import { lastRecordOf } from '../../src/utils/stats';
+import { lastRecordOf, personalBest, e1rm } from '../../src/utils/stats';
 
 export default function ExerciseDetailScreen() {
   const { exerciseId } = useLocalSearchParams<{ exerciseId: string }>();
@@ -27,6 +27,7 @@ export default function ExerciseDetailScreen() {
 
   const form = formByExId(e.id);
   const last = lastRecordOf(logs, e.id);
+  const pb = personalBest(logs, e.id);
   const related = exByPart(e.part).filter((x) => x.id !== e.id).slice(0, 6);
   const rir = rirFor(e);
   const risk = RISK_NOTE[e.id];
@@ -78,6 +79,16 @@ export default function ExerciseDetailScreen() {
               <Text style={s.riskTxt}>{risk}</Text>
             </View>
           ) : null}
+
+          {pb && (
+            <View style={s.pbBox}>
+              <Text style={s.pbLabel}>개인 기록</Text>
+              <Text style={s.pbVal}>
+                {pb.w}kg × {pb.r}
+                <Text style={s.pbEst}>  ·  추정 1RM {Math.round(e1rm(pb.w, pb.r))}kg</Text>
+              </Text>
+            </View>
+          )}
 
           {last && (
             <View style={s.lastBox}>
@@ -196,6 +207,13 @@ const s = StyleSheet.create({
   riskTitle: { fontSize: 11, fontWeight: '800', color: colors.wrong, letterSpacing: 0.5, marginBottom: 6 },
   riskTxt: { fontSize: 13, color: colors.ink, lineHeight: 20 },
 
+  pbBox: {
+    backgroundColor: 'rgba(168,197,160,0.1)', borderRadius: 12, padding: 12,
+    borderWidth: 1, borderColor: 'rgba(168,197,160,0.3)', marginTop: 10,
+  },
+  pbLabel: { fontSize: 9.5, fontWeight: '800', color: colors.good, letterSpacing: 1.5 },
+  pbVal: { fontSize: 15, fontWeight: '800', color: colors.ink, marginTop: 5 },
+  pbEst: { fontSize: 11, fontWeight: '600', color: colors.mid },
   lastBox: {
     backgroundColor: colors.panel2, borderRadius: 12, padding: 12,
     borderWidth: 1, borderColor: colors.line, marginTop: 10,

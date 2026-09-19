@@ -163,6 +163,10 @@ export default function MyScreen() {
             <Text style={s.menuTitle}>운동 기록</Text>
             <Text style={s.menuSub}>{logs.length}회 누적</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={s.menuBtn} onPress={() => router.push('/history/records')}>
+            <Text style={s.menuTitle}>개인 기록</Text>
+            <Text style={s.menuSub}>종목별 최고 중량</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={s.menuBtn} onPress={() => router.push('/profile/edit')}>
             <Text style={s.menuTitle}>내 정보</Text>
             <Text style={s.menuSub}>

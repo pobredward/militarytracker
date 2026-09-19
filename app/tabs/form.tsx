@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList,
 } from 'react-native';
@@ -34,6 +34,18 @@ export default function FormScreen() {
       return true;
     });
   }, [filter, q]);
+
+  const open = useCallback((id: string) => router.push(`/exercise/${id}`), [router]);
+
+  // 인라인 엘리먼트로 두면 검색어를 칠 때마다 헤더가 리마운트된다
+  const Header = useCallback(
+    () => (
+      <Text style={s.descTxt}>
+        {list.length}개 종목 · 카드를 누르면 영상과 자세 포인트를 확인할 수 있습니다.
+      </Text>
+    ),
+    [list.length]
+  );
 
   return (
     <SafeAreaView style={s.root} edges={['top']}>
@@ -83,35 +95,30 @@ export default function FormScreen() {
         columnWrapperStyle={s.row}
         contentContainerStyle={s.listInner}
         showsVerticalScrollIndicator={false}
-        initialNumToRender={10}
-        maxToRenderPerBatch={10}
+        initialNumToRender={12}
+        maxToRenderPerBatch={8}
         windowSize={7}
-        removeClippedSubviews
-        ListHeaderComponent={
-          <Text style={s.descTxt}>
-            {list.length}개 종목 · 카드를 누르면 영상과 자세 포인트를 확인할 수 있습니다.
-          </Text>
-        }
+        // removeClippedSubviews 는 numColumns 와 함께 쓰면 안드로이드에서
+        // 빠르게 스크롤할 때 셀이 빈 칸으로 남는 문제가 있어 쓰지 않는다
+        ListHeaderComponent={Header}
         ListEmptyComponent={<Text style={s.empty}>검색 결과가 없습니다.</Text>}
-        renderItem={({ item }) => <Card ex={item} onPress={() => router.push(`/exercise/${item.id}`)} />}
+        renderItem={({ item }) => <Card ex={item} onPress={open} />}
       />
     </SafeAreaView>
   );
 }
 
-function Card({ ex, onPress }: { ex: Exercise; onPress: () => void }) {
+const Card = memo(function Card({ ex, onPress }: { ex: Exercise; onPress: (id: string) => void }) {
   const form = formByExId(ex.id);
   const video = hasVideo(ex.id);
 
   return (
-    <TouchableOpacity style={s.card} activeOpacity={0.75} onPress={onPress}>
+    <TouchableOpacity style={s.card} activeOpacity={0.75} onPress={() => onPress(ex.id)}>
       {/* 그리드에서는 포스터만 — 영상 플레이어를 180개 만들지 않는다 */}
       <ExerciseMedia exId={ex.id} rounded={16} style={s.thumb} dim={0.4} />
 
       <View style={s.badgeRow}>
-        {video && (
-          <View style={s.vBadge}><Text style={s.vBadgeTxt}>▶ 영상</Text></View>
-        )}
+        {video && <View style={s.vBadge}><Text style={s.vBadgeTxt}>▶ 영상</Text></View>}
         {form && (
           <>
             <View style={s.errBadge}><Text style={s.errBadgeTxt}>✕ {form.w.length}</Text></View>
@@ -121,15 +128,13 @@ function Card({ ex, onPress }: { ex: Exercise; onPress: () => void }) {
       </View>
 
       <Text style={s.name} numberOfLines={1}>{ex.n}</Text>
-      <Text style={s.sub} numberOfLines={1}>
-        {PART_LABEL[ex.part]} · {ex.g}
-      </Text>
+      <Text style={s.sub} numberOfLines={1}>{PART_LABEL[ex.part]} · {ex.g}</Text>
       <Text style={s.meta2} numberOfLines={1}>
         {ex.eq.map((q) => EQUIP_LABEL[q]).join('/')} · {LEVEL_LABEL[ex.lv]}
       </Text>
     </TouchableOpacity>
   );
-}
+});
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
