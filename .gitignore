@@ -54,3 +54,6 @@ firestore-debug.log
 
 # 영상 원본(마스터) — 저장소에는 배포본(assets/exercise/video)만 둔다
 /assets/video/
+
+# Firebase Hosting 배포 캐시
+.firebase/
