@@ -8,7 +8,7 @@ import { colors } from '../../src/utils/colors';
 import {
   EX, Exercise, Part, PART_LABEL, PART_ORDER, EQUIP_LABEL, LEVEL_LABEL,
 } from '../../src/data/exercises';
-import { formByExId } from '../../src/data/formCheck';
+import { formByExId, FORM_COUNT } from '../../src/data/formCheck';
 import { hasVideo, VIDEO_COUNT } from '../../src/data/media';
 import ExerciseMedia from '../../src/components/ExerciseMedia';
 
@@ -41,7 +41,7 @@ export default function FormScreen() {
   const Header = useCallback(
     () => (
       <Text style={s.descTxt}>
-        {list.length}개 종목 · 카드를 누르면 영상과 자세 포인트를 확인할 수 있습니다.
+        {list.length}개 종목 · 전 종목에 자주 하는 실수와 교정 포인트가 있습니다.
       </Text>
     ),
     [list.length]
@@ -51,7 +51,7 @@ export default function FormScreen() {
     <SafeAreaView style={s.root} edges={['top']}>
       <View style={s.topbar}>
         <Text style={s.title}>자세 체크</Text>
-        <Text style={s.meta}>{EX.length}종목 · 영상 {VIDEO_COUNT}</Text>
+        <Text style={s.meta}>자세 {FORM_COUNT} · 영상 {VIDEO_COUNT}</Text>
       </View>
 
       <View style={s.searchWrap}>

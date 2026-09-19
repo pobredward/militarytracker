@@ -110,16 +110,10 @@ export default function ExerciseDetailScreen() {
                 <Point key={i} text={c} mode="c" />
               ))}
             </>
-          ) : (
-            <>
-              <SectionLabel>수행 원칙</SectionLabel>
-              <Text style={s.emptyForm}>{ROM_NOTE}</Text>
-              <Text style={[s.emptyForm, { marginTop: 10 }]}>
-                이 종목의 상세 교정 포인트는 준비 중입니다. 공통 원칙은 척추 중립 유지, 반동 없이,
-                내리는 구간을 통제하는 것입니다.
-              </Text>
-            </>
-          )}
+          ) : null}
+
+          <SectionLabel>수행 원칙</SectionLabel>
+          <Text style={s.emptyForm}>{ROM_NOTE}</Text>
 
           {related.length > 0 && (
             <>
