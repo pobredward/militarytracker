@@ -11,9 +11,10 @@ import {
   Alert,
   ScrollView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Link } from 'expo-router';
 import { signInWithEmail } from '../../src/services/authService';
-import { Colors } from '../../src/utils/colors';
+import { colors } from '../../src/utils/colors';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -29,7 +30,6 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await signInWithEmail(email.trim(), password);
-      router.replace('/tabs/home');
     } catch (e: any) {
       const msg =
         e.code === 'auth/user-not-found' || e.code === 'auth/wrong-password'
@@ -44,110 +44,83 @@ export default function LoginScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <View style={styles.header}>
-          <Text style={styles.emoji}>🪖</Text>
-          <Text style={styles.title}>밀리터리트래커</Text>
-          <Text style={styles.subtitle}>군 훈련 목표를 달성하세요</Text>
+    <SafeAreaView style={s.root}>
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
+        <View style={s.header}>
+          <Text style={s.logo}>MILITARYTRACKER</Text>
+          <Text style={s.sub}>검증된 자세 가이드 위에서 기록하는{'\n'}가장 단순한 트레이닝 앱</Text>
         </View>
 
-        <View style={styles.form}>
+        <View style={s.form}>
+          <Text style={s.label}>이메일</Text>
           <TextInput
-            style={styles.input}
-            placeholder="이메일"
-            placeholderTextColor={Colors.textMuted}
+            style={s.input}
+            placeholder="email@example.com"
+            placeholderTextColor={colors.muted}
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
           />
+          <Text style={s.label}>비밀번호</Text>
           <TextInput
-            style={styles.input}
-            placeholder="비밀번호"
-            placeholderTextColor={Colors.textMuted}
+            style={s.input}
+            placeholder="6자 이상"
+            placeholderTextColor={colors.muted}
             value={password}
             onChangeText={setPassword}
             secureTextEntry
           />
 
-          <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleLogin}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color={Colors.white} />
-            ) : (
-              <Text style={styles.buttonText}>로그인</Text>
-            )}
+          <TouchableOpacity style={[s.btn, loading && s.btnOff]} onPress={handleLogin} disabled={loading}>
+            {loading ? <ActivityIndicator color={colors.bg} /> : <Text style={s.btnTxt}>로그인</Text>}
           </TouchableOpacity>
 
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>또는</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>계정이 없으신가요? </Text>
+          <View style={s.footer}>
+            <Text style={s.footerTxt}>계정이 없으신가요? </Text>
             <Link href="/auth/signup" asChild>
               <TouchableOpacity>
-                <Text style={styles.link}>회원가입</Text>
+                <Text style={s.link}>회원가입</Text>
               </TouchableOpacity>
             </Link>
           </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.primary },
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
   scroll: { flexGrow: 1, justifyContent: 'center', padding: 24 },
   header: { alignItems: 'center', marginBottom: 48 },
-  emoji: { fontSize: 64, marginBottom: 12 },
-  title: { fontSize: 28, fontWeight: '800', color: Colors.white, letterSpacing: 1 },
-  subtitle: { fontSize: 14, color: 'rgba(255,255,255,0.7)', marginTop: 6 },
-  form: {
-    backgroundColor: Colors.white,
-    borderRadius: 20,
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 8,
-  },
+  logo: { fontSize: 22, fontWeight: '700', color: colors.ink, letterSpacing: 2 },
+  sub: { fontSize: 13, color: colors.muted, marginTop: 10, textAlign: 'center', lineHeight: 20 },
+  form: {},
+  label: { fontSize: 12, color: colors.muted, marginBottom: 6, marginTop: 14 },
   input: {
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    backgroundColor: colors.panel2,
+    borderWidth: 1,
+    borderColor: colors.line2,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
     fontSize: 15,
-    color: Colors.text,
-    marginBottom: 14,
-    backgroundColor: Colors.background,
+    color: colors.ink,
   },
-  button: {
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
-    paddingVertical: 16,
+  btn: {
+    backgroundColor: colors.ink,
+    borderRadius: 10,
+    paddingVertical: 15,
     alignItems: 'center',
-    marginTop: 4,
+    marginTop: 24,
   },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: Colors.white, fontSize: 16, fontWeight: '700' },
-  divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 20 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: Colors.border },
-  dividerText: { marginHorizontal: 12, color: Colors.textMuted, fontSize: 13 },
-  footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  footerText: { color: Colors.textSecondary, fontSize: 14 },
-  link: { color: Colors.primary, fontWeight: '700', fontSize: 14 },
+  btnOff: { opacity: 0.4 },
+  btnTxt: { color: colors.bg, fontSize: 15, fontWeight: '700' },
+  footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 24 },
+  footerTxt: { color: colors.muted, fontSize: 13 },
+  link: { color: colors.ink, fontWeight: '700', fontSize: 13 },
 });

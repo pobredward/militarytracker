@@ -1,56 +1,101 @@
 import { Tabs } from 'expo-router';
-import { Text } from 'react-native';
-import { Colors } from '../../src/utils/colors';
+import { View, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { colors } from '../../src/utils/colors';
 
-function TabIcon({ emoji, label, focused }: { emoji: string; label: string; focused: boolean }) {
+type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
+
+function TabIcon({
+  name,
+  focused,
+}: {
+  name: IoniconName;
+  focused: boolean;
+}) {
   return (
-    <Text style={{ fontSize: focused ? 24 : 22, opacity: focused ? 1 : 0.5 }}>{emoji}</Text>
+    <View style={[ic.wrap, focused && ic.wrapActive]}>
+      <Ionicons
+        name={name}
+        size={22}
+        color={focused ? colors.ink : colors.muted}
+      />
+    </View>
   );
 }
+
+const ic = StyleSheet.create({
+  wrap: {
+    width: 40,
+    height: 30,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  wrapActive: { backgroundColor: colors.panel2 },
+});
 
 export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: Colors.primary,
-        tabBarInactiveTintColor: Colors.textMuted,
         tabBarStyle: {
-          backgroundColor: Colors.white,
-          borderTopColor: Colors.border,
-          borderTopWidth: 1,
-          height: 60,
-          paddingBottom: 8,
+          backgroundColor: colors.bg,
+          borderTopColor: colors.line,
+          borderTopWidth: 0.5,
+          height: 72,
+          paddingTop: 6,
+          paddingBottom: 14,
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        tabBarActiveTintColor: colors.ink,
+        tabBarInactiveTintColor: colors.muted,
+        tabBarLabelStyle: { fontSize: 10, fontWeight: '600', letterSpacing: 0.2 },
+        tabBarShowLabel: true,
       }}
     >
       <Tabs.Screen
         name="home"
         options={{
           title: '홈',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="🏠" label="홈" focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name={focused ? 'home' : 'home-outline'} focused={focused} />
+          ),
         }}
       />
       <Tabs.Screen
-        name="workout"
+        name="plan"
         options={{
           title: '운동',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="💪" label="운동" focused={focused} />,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name={focused ? 'barbell' : 'barbell-outline'} focused={focused} />
+          ),
         }}
       />
       <Tabs.Screen
-        name="community"
+        name="form"
         options={{
-          title: '커뮤니티',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="👥" label="커뮤니티" focused={focused} />,
+          title: '자세',
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name={focused ? 'body' : 'body-outline'} focused={focused} />
+          ),
         }}
       />
       <Tabs.Screen
-        name="profile"
+        name="diet"
         options={{
-          title: '프로필',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="👤" label="프로필" focused={focused} />,
+          title: '식단',
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name={focused ? 'nutrition' : 'nutrition-outline'} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="my"
+        options={{
+          title: 'MY',
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name={focused ? 'person' : 'person-outline'} focused={focused} />
+          ),
         }}
       />
     </Tabs>

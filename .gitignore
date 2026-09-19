@@ -43,3 +43,14 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Cloud Functions build output
+functions/lib/
+
+# Firebase 디버그 로그
+firebase-debug.log
+*-debug.log
+firestore-debug.log
+
+# 영상 원본(마스터) — 저장소에는 배포본(assets/exercise/video)만 둔다
+/assets/video/

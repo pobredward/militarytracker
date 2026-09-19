@@ -1,8 +1,88 @@
 rules_version = '2';
+
+// MilitaryTracker — Firestore 보안 규칙
+// 원칙: 본인 데이터만 읽고 쓴다. role == 'admin' 계정은 전체 허용.
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // ── 공통 함수 ─────────────────────────────────────────────────────────
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(uid())).data;
+    }
+
+    // 관리자 판정
+    //  1) 커스텀 클레임 admin == true  → 문서 read 비용 없음 (권장)
+    //  2) users/{uid}.role == 'admin'  → 콘솔에서 필드만 바꿔도 적용
+    function isAdmin() {
+      return signedIn() && (
+        request.auth.token.admin == true ||
+        (exists(/databases/$(database)/documents/users/$(uid())) && userDoc().role == 'admin')
+      );
+    }
+
+    function isOwner(ownerId) {
+      return signedIn() && uid() == ownerId;
+    }
+
+    function ownsExisting() {
+      return signedIn() && resource.data.userId == uid();
+    }
+
+    function ownsIncoming() {
+      return signedIn() && request.resource.data.userId == uid();
+    }
+
+    // role 필드는 본인이 바꿀 수 없다 (권한 상승 차단)
+    function roleUnchanged() {
+      return !('role' in request.resource.data) ||
+             request.resource.data.role == resource.data.role;
+    }
+
+    // ── users ─────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+
+      // 가입 시 본인 문서 생성 — 스스로 admin 을 부여할 수 없다
+      allow create: if (isOwner(userId) && request.resource.data.role == 'user') || isAdmin();
+      allow update: if (isOwner(userId) && roleUnchanged()) || isAdmin();
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    // ── plans/{uid} ───────────────────────────────────────────────────────
+    match /plans/{userId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+    }
+
+    // ── workoutLogs ───────────────────────────────────────────────────────
+    match /workoutLogs/{logId} {
+      // list 는 where('userId','==',uid) 로 필터된 쿼리만 통과한다
+      allow read: if isAdmin() || ownsExisting();
+      allow create: if isAdmin() || ownsIncoming();
+      allow update: if (ownsExisting() && ownsIncoming()) || isAdmin();
+      allow delete: if isAdmin() || ownsExisting();
+    }
+
+    // ── weights ───────────────────────────────────────────────────────────
+    match /weights/{weightId} {
+      allow read: if isAdmin() || ownsExisting();
+      allow create: if isAdmin() || ownsIncoming();
+      allow update: if (ownsExisting() && ownsIncoming()) || isAdmin();
+      allow delete: if isAdmin() || ownsExisting();
+    }
+
+    // ── 그 외 모든 경로 ───────────────────────────────────────────────────
+    // 정의되지 않은 컬렉션은 관리자만 접근 가능
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if isAdmin();
     }
   }
 }

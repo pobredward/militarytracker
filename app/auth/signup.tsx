@@ -11,12 +11,12 @@ import {
   Alert,
   ScrollView,
 } from 'react-native';
-import { useRouter, Link } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Link } from 'expo-router';
 import { signUpWithEmail } from '../../src/services/authService';
-import { Colors } from '../../src/utils/colors';
+import { colors } from '../../src/utils/colors';
 
 export default function SignupScreen() {
-  const router = useRouter();
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -39,7 +39,7 @@ export default function SignupScreen() {
     setLoading(true);
     try {
       await signUpWithEmail(email.trim(), password, displayName.trim());
-      router.replace('/tabs/home');
+      // _layout.tsx의 onAuthChange가 onboarding 라우팅 처리
     } catch (e: any) {
       const msg =
         e.code === 'auth/email-already-in-use'
@@ -54,117 +54,71 @@ export default function SignupScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <View style={styles.header}>
-          <Text style={styles.emoji}>🪖</Text>
-          <Text style={styles.title}>회원가입</Text>
-          <Text style={styles.subtitle}>밀리터리트래커에 오신 것을 환영합니다</Text>
+    <SafeAreaView style={s.root}>
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
+        <View style={s.header}>
+          <Text style={s.logo}>MILITARYTRACKER</Text>
+          <Text style={s.sub}>계정을 만들고 시작하세요</Text>
         </View>
 
-        <View style={styles.form}>
-          <TextInput
-            style={styles.input}
-            placeholder="닉네임"
-            placeholderTextColor={Colors.textMuted}
-            value={displayName}
-            onChangeText={setDisplayName}
-            maxLength={20}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="이메일"
-            placeholderTextColor={Colors.textMuted}
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="비밀번호 (6자 이상)"
-            placeholderTextColor={Colors.textMuted}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="비밀번호 확인"
-            placeholderTextColor={Colors.textMuted}
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            secureTextEntry
-          />
+        <View style={s.form}>
+          <Text style={s.label}>닉네임</Text>
+          <TextInput style={s.input} placeholder="사용할 이름" placeholderTextColor={colors.muted} value={displayName} onChangeText={setDisplayName} maxLength={20} />
+          <Text style={s.label}>이메일</Text>
+          <TextInput style={s.input} placeholder="email@example.com" placeholderTextColor={colors.muted} value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} />
+          <Text style={s.label}>비밀번호</Text>
+          <TextInput style={s.input} placeholder="6자 이상" placeholderTextColor={colors.muted} value={password} onChangeText={setPassword} secureTextEntry />
+          <Text style={s.label}>비밀번호 확인</Text>
+          <TextInput style={s.input} placeholder="동일하게 입력" placeholderTextColor={colors.muted} value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry />
 
-          <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleSignup}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color={Colors.white} />
-            ) : (
-              <Text style={styles.buttonText}>가입하기</Text>
-            )}
+          <TouchableOpacity style={[s.btn, loading && s.btnOff]} onPress={handleSignup} disabled={loading}>
+            {loading ? <ActivityIndicator color={colors.bg} /> : <Text style={s.btnTxt}>가입하기</Text>}
           </TouchableOpacity>
 
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>이미 계정이 있으신가요? </Text>
+          <View style={s.footer}>
+            <Text style={s.footerTxt}>이미 계정이 있으신가요? </Text>
             <Link href="/auth/login" asChild>
               <TouchableOpacity>
-                <Text style={styles.link}>로그인</Text>
+                <Text style={s.link}>로그인</Text>
               </TouchableOpacity>
             </Link>
           </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.primary },
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
   scroll: { flexGrow: 1, justifyContent: 'center', padding: 24 },
-  header: { alignItems: 'center', marginBottom: 36 },
-  emoji: { fontSize: 56, marginBottom: 10 },
-  title: { fontSize: 26, fontWeight: '800', color: Colors.white },
-  subtitle: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 6 },
-  form: {
-    backgroundColor: Colors.white,
-    borderRadius: 20,
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 8,
-  },
+  header: { alignItems: 'center', marginBottom: 40 },
+  logo: { fontSize: 22, fontWeight: '700', color: colors.ink, letterSpacing: 2 },
+  sub: { fontSize: 13, color: colors.muted, marginTop: 10 },
+  form: {},
+  label: { fontSize: 12, color: colors.muted, marginBottom: 6, marginTop: 14 },
   input: {
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    backgroundColor: colors.panel2,
+    borderWidth: 1,
+    borderColor: colors.line2,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
     fontSize: 15,
-    color: Colors.text,
-    marginBottom: 12,
-    backgroundColor: Colors.background,
+    color: colors.ink,
   },
-  button: {
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
-    paddingVertical: 16,
+  btn: {
+    backgroundColor: colors.ink,
+    borderRadius: 10,
+    paddingVertical: 15,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 24,
   },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: Colors.white, fontSize: 16, fontWeight: '700' },
-  footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 20 },
-  footerText: { color: Colors.textSecondary, fontSize: 14 },
-  link: { color: Colors.primary, fontWeight: '700', fontSize: 14 },
+  btnOff: { opacity: 0.4 },
+  btnTxt: { color: colors.bg, fontSize: 15, fontWeight: '700' },
+  footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 24 },
+  footerTxt: { color: colors.muted, fontSize: 13 },
+  link: { color: colors.ink, fontWeight: '700', fontSize: 13 },
 });

@@ -2,21 +2,26 @@
   "expo": {
     "name": "밀리터리트래커",
     "slug": "militarytracker",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "scheme": "militarytracker",
+    "backgroundColor": "#09090A",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.militarytracker.app"
+      "bundleIdentifier": "com.militarytracker.app",
+      "userInterfaceStyle": "dark"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#1B3A6B",
-        "foregroundImage": "./assets/adaptive-icon.png"
+        "backgroundColor": "#09090A",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "package": "com.militarytracker.app"
+      "package": "com.militarytracker.app",
+      "userInterfaceStyle": "dark",
+      "edgeToEdgeEnabled": true
     },
     "web": {
       "bundler": "metro",
@@ -25,21 +30,21 @@
     },
     "plugins": [
       "expo-router",
-      "expo-status-bar",
-      "expo-font",
-      "expo-splash-screen",
       [
         "expo-splash-screen",
         {
           "image": "./assets/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#1B3A6B"
+          "backgroundColor": "#09090A"
         }
-      ]
+      ],
+      "expo-font",
+      "expo-status-bar",
+      "expo-video"
     ],
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": false
     }
   }
 }

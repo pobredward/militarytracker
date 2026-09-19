@@ -1,222 +1,215 @@
-import * as functions from 'firebase-functions';
-import * as admin from 'firebase-admin';
-
-admin.initializeApp();
-const db = admin.firestore();
-
 /**
- * workout 생성 시 자동으로 rankings 업데이트
+ * MilitaryTracker — AI 프록시 (Cloud Functions v2, asia-northeast3)
+ *
+ * 앱은 Anthropic API 를 직접 호출하지 않는다. 키는 Secret Manager 에만 존재한다.
+ *   firebase functions:secrets:set ANTHROPIC_API_KEY
+ *   firebase deploy --only functions
  */
-export const onWorkoutCreated = functions
-  .region('asia-northeast3') // 서울 리전
-  .firestore
-  .document('workouts/{workoutId}')
-  .onCreate(async (snap, context) => {
-    const workout = snap.data();
-    const userId = workout.userId;
-    const date = workout.date.toDate();
-    
-    console.log(`✅ Workout created: ${context.params.workoutId}`);
-    console.log(`   User: ${userId}, Date: ${date.toISOString()}`);
-    
-    try {
-      await updateRankings(userId, workout, date, 'create');
-      console.log(`✅ Rankings updated successfully`);
-    } catch (error) {
-      console.error(`❌ Error updating rankings:`, error);
-      throw error;
+import { onCall, HttpsError, CallableRequest } from 'firebase-functions/v2/https';
+import { setGlobalOptions } from 'firebase-functions/v2';
+import { defineSecret } from 'firebase-functions/params';
+import * as logger from 'firebase-functions/logger';
+
+const ANTHROPIC_API_KEY = defineSecret('ANTHROPIC_API_KEY');
+
+setGlobalOptions({ region: 'asia-northeast3', maxInstances: 10 });
+
+const MODEL = 'claude-sonnet-4-5';
+const API_URL = 'https://api.anthropic.com/v1/messages';
+const API_VERSION = '2023-06-01';
+
+interface AnthropicMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+async function callAnthropic(opts: {
+  system: string;
+  messages: AnthropicMessage[];
+  maxTokens: number;
+  apiKey: string;
+}): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 55_000);
+
+  try {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': opts.apiKey,
+        'anthropic-version': API_VERSION,
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: opts.maxTokens,
+        system: opts.system,
+        messages: opts.messages,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      logger.error('anthropic error', { status: res.status, body: body.slice(0, 500) });
+      throw new HttpsError('unavailable', `AI 응답 실패 (${res.status})`);
     }
-  });
 
-/**
- * workout 업데이트 시 rankings도 업데이트
- */
-export const onWorkoutUpdated = functions
-  .region('asia-northeast3')
-  .firestore
-  .document('workouts/{workoutId}')
-  .onUpdate(async (change, context) => {
-    const before = change.before.data();
-    const after = change.after.data();
-    const userId = after.userId;
-    const date = after.date.toDate();
-    
-    console.log(`🔄 Workout updated: ${context.params.workoutId}`);
-    
-    // 변경된 값 계산
-    const diff = {
-      squatCount: (after.squatCount || 0) - (before.squatCount || 0),
-      lungeCount: (after.lungeCount || 0) - (before.lungeCount || 0),
-      walkSteps: (after.walkSteps || 0) - (before.walkSteps || 0),
-      runDistance: (after.runDistance || 0) - (before.runDistance || 0),
+    const data = (await res.json()) as { content?: { type: string; text?: string }[] };
+    return (data.content ?? [])
+      .filter((c) => c.type === 'text')
+      .map((c) => c.text ?? '')
+      .join('')
+      .trim();
+  } catch (e) {
+    if (e instanceof HttpsError) throw e;
+    logger.error('anthropic fetch failed', e);
+    throw new HttpsError('unavailable', 'AI 서버에 연결하지 못했습니다.');
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/** 코드펜스가 섞여 와도 첫 JSON 객체만 뽑아낸다 */
+function parseJson<T>(raw: string): T {
+  const clean = raw.replace(/```json|```/g, '').trim();
+  const start = clean.indexOf('{');
+  const end = clean.lastIndexOf('}');
+  if (start < 0 || end < 0) throw new HttpsError('internal', 'AI 응답 형식 오류');
+  try {
+    return JSON.parse(clean.slice(start, end + 1)) as T;
+  } catch {
+    throw new HttpsError('internal', 'AI 응답 파싱 실패');
+  }
+}
+
+function requireAuth(req: CallableRequest): string {
+  if (!req.auth?.uid) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
+  return req.auth.uid;
+}
+
+const str = (v: unknown, max = 200): string => String(v ?? '').slice(0, max);
+const int = (v: unknown, fallback = 0): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n) : fallback;
+};
+
+// ─── 1. 운동 플랜 ───────────────────────────────────────────────────────────
+interface PlanReq {
+  profile: {
+    sex: string; age: string; height: string; weight: string;
+    goal: string; env: string; days: number; level: number;
+  };
+  catalog: string;
+}
+
+export const aiPlan = onCall(
+  { secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 60, memory: '256MiB' },
+  async (req: CallableRequest<PlanReq>) => {
+    requireAuth(req);
+    const p = req.data?.profile;
+    const catalog = str(req.data?.catalog, 12000);
+    if (!p || !catalog) throw new HttpsError('invalid-argument', '요청 정보가 부족합니다.');
+
+    const goalMap: Record<string, string> = {
+      muscle: '근성장', cut: '체지방 감량', habit: '운동 습관 만들기',
     };
-    
-    try {
-      await updateRankings(userId, diff, date, 'update');
-      console.log(`✅ Rankings updated for diff:`, diff);
-    } catch (error) {
-      console.error(`❌ Error updating rankings:`, error);
-      throw error;
-    }
-  });
+    const levelMap: Record<number, string> = { 1: '입문', 2: '중급', 3: '상급' };
+    const days = Math.min(6, Math.max(2, int(p.days, 3)));
+    const perDay = p.goal === 'habit' ? 3 : 5;
 
-/**
- * 모든 기간별 랭킹 업데이트
- */
-async function updateRankings(
-  userId: string,
-  workout: any,
-  date: Date,
-  operation: 'create' | 'update'
-) {
-  const batch = db.batch();
-  
-  // 사용자 정보 조회 (생성 시에만)
-  let displayName = '사용자';
-  let photoUrl: string | null = null;
-  
-  if (operation === 'create') {
-    try {
-      const userDoc = await db.collection('users').doc(userId).get();
-      const userData = userDoc.data();
-      displayName = userData?.displayName || '사용자';
-      photoUrl = userData?.photoUrl || null;
-    } catch (error) {
-      console.warn('Failed to fetch user data:', error);
-    }
+    const prompt = [
+      `사용자: ${p.sex === 'male' ? '남' : '여'} ${str(p.age, 4)}세 / ${str(p.height, 6)}cm ${str(p.weight, 6)}kg`,
+      `목표: ${goalMap[p.goal] ?? '근성장'} / 환경: ${p.env === 'gym' ? '헬스장' : '홈트'} / 주 ${days}일 / 수준: ${levelMap[int(p.level, 1)] ?? '입문'}`,
+      '',
+      `아래 목록의 id 만 사용해 주 ${days}일 분할 루틴을 만들어라. 하루 ${perDay}종목.`,
+      '큰 근육 → 작은 근육 순서로 배치하고, 같은 부위가 연속된 데이에 겹치지 않게 하라.',
+      '',
+      `운동 목록(id|이름|부위|난이도):`,
+      catalog,
+      '',
+      '출력 형식(JSON만):',
+      '{"days":[{"id":"push","name":"푸시데이","focus":"가슴·어깨·삼두","ids":["bench","..."]}],"reason":"이 분할을 추천한 이유 한 문장"}',
+    ].join('\n');
+
+    const raw = await callAnthropic({
+      system: '너는 근거 기반 운동 프로그램 설계 AI다. 반드시 유효한 JSON 객체만 출력한다. 마크다운, 백틱, 설명 텍스트 금지.',
+      messages: [{ role: 'user', content: prompt }],
+      maxTokens: 1500,
+      apiKey: ANTHROPIC_API_KEY.value(),
+    });
+
+    return parseJson(raw);
   }
-  
-  // 종합 점수 계산
-  const overallScore = calculateOverallScore(workout);
-  
-  // 1. 일간 랭킹 업데이트
-  const dailyKey = formatDate(date, 'YYYY-MM-DD');
-  const dailyRef = db
-    .collection('rankings')
-    .doc('daily')
-    .collection(dailyKey)
-    .doc(userId);
-  
-  batch.set(dailyRef, {
-    squatCount: admin.firestore.FieldValue.increment(workout.squatCount || 0),
-    lungeCount: admin.firestore.FieldValue.increment(workout.lungeCount || 0),
-    walkSteps: admin.firestore.FieldValue.increment(workout.walkSteps || 0),
-    runDistance: admin.firestore.FieldValue.increment(workout.runDistance || 0),
-    overallScore: admin.firestore.FieldValue.increment(overallScore),
-    ...(operation === 'create' && { displayName, photoUrl }),
-    lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-  }, { merge: true });
-  
-  // 2. 주간 랭킹 업데이트
-  const weekKey = getWeekKey(date);
-  const weeklyRef = db
-    .collection('rankings')
-    .doc('weekly')
-    .collection(weekKey)
-    .doc(userId);
-  
-  batch.set(weeklyRef, {
-    squatCount: admin.firestore.FieldValue.increment(workout.squatCount || 0),
-    lungeCount: admin.firestore.FieldValue.increment(workout.lungeCount || 0),
-    walkSteps: admin.firestore.FieldValue.increment(workout.walkSteps || 0),
-    runDistance: admin.firestore.FieldValue.increment(workout.runDistance || 0),
-    overallScore: admin.firestore.FieldValue.increment(overallScore),
-    ...(operation === 'create' && { displayName, photoUrl }),
-    lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-  }, { merge: true });
-  
-  // 3. 월간 랭킹 업데이트
-  const monthKey = formatDate(date, 'YYYY-MM');
-  const monthlyRef = db
-    .collection('rankings')
-    .doc('monthly')
-    .collection(monthKey)
-    .doc(userId);
-  
-  batch.set(monthlyRef, {
-    squatCount: admin.firestore.FieldValue.increment(workout.squatCount || 0),
-    lungeCount: admin.firestore.FieldValue.increment(workout.lungeCount || 0),
-    walkSteps: admin.firestore.FieldValue.increment(workout.walkSteps || 0),
-    runDistance: admin.firestore.FieldValue.increment(workout.runDistance || 0),
-    overallScore: admin.firestore.FieldValue.increment(overallScore),
-    ...(operation === 'create' && { displayName, photoUrl }),
-    lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-  }, { merge: true });
-  
-  // 4. 전체 랭킹 업데이트
-  const allTimeRef = db
-    .collection('rankings')
-    .doc('allTime')
-    .collection('users')
-    .doc(userId);
-  
-  batch.set(allTimeRef, {
-    squatCount: admin.firestore.FieldValue.increment(workout.squatCount || 0),
-    lungeCount: admin.firestore.FieldValue.increment(workout.lungeCount || 0),
-    walkSteps: admin.firestore.FieldValue.increment(workout.walkSteps || 0),
-    runDistance: admin.firestore.FieldValue.increment(workout.runDistance || 0),
-    overallScore: admin.firestore.FieldValue.increment(overallScore),
-    ...(operation === 'create' && { displayName, photoUrl }),
-    lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-  }, { merge: true });
-  
-  // 배치 커밋
-  await batch.commit();
+);
+
+// ─── 2. 식단 ────────────────────────────────────────────────────────────────
+interface DietReq {
+  bodyType: string; goal: string;
+  kcal: number; protein: number; carb: number; fat: number;
+  foodEnv: string; allergy: string;
 }
 
-/**
- * 종합 점수 계산
- */
-function calculateOverallScore(workout: any): number {
-  const squatScore = (workout.squatCount || 0) * 1.2;
-  const lungeScore = (workout.lungeCount || 0) * 1.2;
-  const walkScore = (workout.walkSteps || 0) * 0.01;
-  const runScore = (workout.runDistance || 0) * 150;
-  
-  return squatScore + lungeScore + walkScore + runScore;
-}
+export const aiDiet = onCall(
+  { secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 60, memory: '256MiB' },
+  async (req: CallableRequest<DietReq>) => {
+    requireAuth(req);
+    const d = req.data;
+    if (!d) throw new HttpsError('invalid-argument', '요청 정보가 부족합니다.');
 
-/**
- * 날짜 포맷팅
- */
-function formatDate(date: Date, format: string): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  
-  if (format === 'YYYY-MM-DD') {
-    return `${year}-${month}-${day}`;
-  } else if (format === 'YYYY-MM') {
-    return `${year}-${month}`;
+    const prompt = [
+      `사용자: ${str(d.bodyType, 30)}, 목표 ${str(d.goal, 30)}`,
+      `하루 ${int(d.kcal, 2000)}kcal / 단백질 ${int(d.protein, 120)}g / 탄수 ${int(d.carb, 200)}g / 지방 ${int(d.fat, 60)}g`,
+      `식사 환경: ${str(d.foodEnv, 30)} / 알레르기·제외: ${str(d.allergy, 120)}`,
+      '한국에서 구하기 쉬운 음식으로 하루 식단(아침/점심/저녁/간식)을 구성하라.',
+      '출력: {"meals":[{"t":"아침","m":"음식 구성","k":"약 500kcal · 단백질 30g"}],"tip":"한 줄 팁"}',
+    ].join('\n');
+
+    const raw = await callAnthropic({
+      system: '너는 스포츠 영양 가이드 AI다. 반드시 유효한 JSON만 출력한다. 마크다운 금지. 의학적 진단이나 치료 조언은 하지 않는다.',
+      messages: [{ role: 'user', content: prompt }],
+      maxTokens: 1000,
+      apiKey: ANTHROPIC_API_KEY.value(),
+    });
+
+    return parseJson(raw);
   }
-  
-  return '';
+);
+
+// ─── 3. 코치 ────────────────────────────────────────────────────────────────
+interface CoachReq {
+  messages: AnthropicMessage[];
+  context: string;
 }
 
-/**
- * 주차 키 생성 (ISO Week)
- */
-function getWeekKey(date: Date): string {
-  // 월요일을 주의 시작으로
-  const d = new Date(date);
-  const dayOfWeek = d.getDay();
-  const diff = d.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-  const monday = new Date(d.setDate(diff));
-  
-  const year = monday.getFullYear();
-  const weekNum = getWeekNumber(monday);
-  
-  return `${year}-W${String(weekNum).padStart(2, '0')}`;
-}
+export const aiCoach = onCall(
+  { secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 60, memory: '256MiB' },
+  async (req: CallableRequest<CoachReq>) => {
+    requireAuth(req);
+    const incoming = Array.isArray(req.data?.messages) ? req.data.messages : [];
+    if (!incoming.length) throw new HttpsError('invalid-argument', '메시지가 비어 있습니다.');
 
-/**
- * ISO 주차 계산
- */
-function getWeekNumber(date: Date): number {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
-  const yearStart = new Date(d.getFullYear(), 0, 1);
-  const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
-  return weekNo;
-}
+    // 최근 20턴만, 각 4000자 제한
+    const messages: AnthropicMessage[] = incoming.slice(-20).map((m) => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: str(m.content, 4000),
+    }));
+    if (messages[0].role !== 'user') messages.shift();
+    if (!messages.length) throw new HttpsError('invalid-argument', '메시지가 비어 있습니다.');
+
+    const system = [
+      "너는 피트니스 앱 'MILITARYTRACKER'의 AI 코치다. 짧고, 데이터 기반, 단정적이되 과장 없음. AI 필러 문구 금지.",
+      str(req.data?.context, 4000),
+      '규칙: 1) 3~5문장 이내 2) 의학 진단 금지, 통증 시 전문가 상담 안내 3) 한국어.',
+    ].join('\n');
+
+    const reply = await callAnthropic({
+      system,
+      messages,
+      maxTokens: 800,
+      apiKey: ANTHROPIC_API_KEY.value(),
+    });
+
+    return { reply };
+  }
+);

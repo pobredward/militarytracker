@@ -1,0 +1,224 @@
+import { useState } from 'react';
+import {
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { colors } from '../../src/utils/colors';
+import { useAppStore } from '../../src/stores/appStore';
+import { useAuthStore } from '../../src/stores/authStore';
+import { exById, EQUIP_LABEL, PART_LABEL } from '../../src/data/exercises';
+import { routineById } from '../../src/data/routines';
+import { savePlan } from '../../src/services/authService';
+import { generatePlan } from '../../src/services/aiService';
+import { buildLocalPlan } from '../../src/utils/planner';
+import SessionPlayer from '../../src/components/SessionPlayer';
+import ExerciseMedia from '../../src/components/ExerciseMedia';
+import { PrimaryBtn, GhostBtn, Notice } from '../../src/components/ui';
+
+const SRC_LABEL: Record<string, string> = { AI: 'AI 구성', LOCAL: '자동 구성', PRESET: '프리셋 루틴' };
+
+export default function PlanScreen() {
+  const router = useRouter();
+  const { user } = useAuthStore();
+  const { plan, profile, session, startSession, setPlan } = useAppStore();
+  const [activeDay, setActiveDay] = useState(0);
+  const [busy, setBusy] = useState<'ai' | 'local' | null>(null);
+
+  async function regenerate(mode: 'ai' | 'local') {
+    if (!profile || !user) {
+      Alert.alert('알림', '신체 정보가 없습니다. MY 탭에서 온보딩 정보를 확인해주세요.');
+      return;
+    }
+    setBusy(mode);
+    try {
+      // 로컬 생성은 매번 다른 시드를 사용해 같은 결과가 반복되지 않는다
+      const next = mode === 'ai' ? await generatePlan(profile) : buildLocalPlan(profile, Date.now());
+      await savePlan(user.uid, next);
+      setPlan(next);
+      setActiveDay(0);
+      if (mode === 'ai' && next.planSrc !== 'AI') {
+        Alert.alert('자동 구성으로 대체', 'AI 서버에 연결하지 못해 자동 알고리즘으로 구성했습니다.');
+      }
+    } catch {
+      Alert.alert('오류', '플랜 재생성에 실패했습니다.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (!plan) {
+    return (
+      <SafeAreaView style={s.root} edges={['top']}>
+        <View style={s.empty}>
+          <Text style={s.emptyTxt}>플랜이 없습니다.{'\n'}루틴을 선택해 시작하세요.</Text>
+          <TouchableOpacity style={s.emptyBtn} onPress={() => router.push('/routine')}>
+            <Text style={s.emptyBtnTxt}>루틴 라이브러리</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const day = plan.days[Math.min(activeDay, plan.days.length - 1)];
+  const routine = plan.routineId ? routineById(plan.routineId) : null;
+
+  return (
+    <SafeAreaView style={s.root} edges={['top']}>
+      <View style={s.topbar}>
+        <Text style={s.title}>운동 플랜</Text>
+        <Text style={s.meta}>{SRC_LABEL[plan.planSrc] ?? plan.planSrc}</Text>
+      </View>
+
+      {/* Routine banner */}
+      <TouchableOpacity
+        style={s.routineBar}
+        activeOpacity={0.8}
+        onPress={() => (routine ? router.push(`/routine/${routine.id}`) : router.push('/routine'))}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={s.routineName}>{routine ? routine.name : '맞춤 구성 플랜'}</Text>
+          <Text style={s.routineSub} numberOfLines={1}>{plan.planReason}</Text>
+        </View>
+        <Text style={s.routineLink}>{routine ? '루틴 보기 ›' : '루틴 탐색 ›'}</Text>
+      </TouchableOpacity>
+
+      {/* Day pills */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.pillScroll} contentContainerStyle={s.pillContent}>
+        {plan.days.map((d, i) => (
+          <TouchableOpacity
+            key={`${d.id}-${i}`}
+            style={[s.pill, activeDay === i && s.pillActive]}
+            onPress={() => setActiveDay(i)}
+          >
+            <Text style={[s.pillTxt, activeDay === i && s.pillTxtActive]}>Day {i + 1}</Text>
+            <Text style={[s.pillSub, activeDay === i && s.pillSubActive]}>{d.name}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      <ScrollView style={s.scroll} contentContainerStyle={s.scrollInner} showsVerticalScrollIndicator={false}>
+        <View style={s.dayHeader}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.dayName}>{day.name}</Text>
+            <Text style={s.dayFocus}>{day.focus}</Text>
+          </View>
+          <TouchableOpacity style={s.startBtn} onPress={() => startSession(activeDay)}>
+            <Text style={s.startBtnTxt}>▶  시작</Text>
+          </TouchableOpacity>
+        </View>
+
+        {day.ids.map((id, i) => {
+          const e = exById(id);
+          if (!e) return null;
+          return (
+            <TouchableOpacity
+              key={`${id}-${i}`}
+              style={s.exCard}
+              activeOpacity={0.75}
+              onPress={() => router.push(`/exercise/${id}`)}
+            >
+              <ExerciseMedia exId={id} rounded={12} style={s.exThumb} dim={0.3} />
+              <View style={s.exInfo}>
+                <Text style={s.exOrder}>{String(i + 1).padStart(2, '0')}</Text>
+                <Text style={s.exName}>{e.n}</Text>
+                <Text style={s.exPart}>
+                  {PART_LABEL[e.part]} · {e.eq.map((q) => EQUIP_LABEL[q]).join('/')}
+                </Text>
+              </View>
+              <View style={s.exSetsWrap}>
+                <Text style={s.exSetsNum}>{e.s}</Text>
+                <Text style={s.exSetsSub}>세트</Text>
+                <Text style={s.exRep}>{e.r}</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+
+        <View style={s.regenRow}>
+          <GhostBtn
+            label="AI로 다시 구성"
+            onPress={() => regenerate('ai')}
+            loading={busy === 'ai'}
+            disabled={busy !== null}
+            style={{ flex: 1 }}
+          />
+          <GhostBtn
+            label="자동 재구성"
+            onPress={() => regenerate('local')}
+            loading={busy === 'local'}
+            disabled={busy !== null}
+            style={{ flex: 1 }}
+          />
+        </View>
+        <PrimaryBtn label="다른 루틴 둘러보기" onPress={() => router.push('/routine')} style={{ marginTop: 10 }} />
+
+        <Notice>일반적인 운동 가이드입니다. 통증이나 질환이 있다면 전문가와 상담하세요.</Notice>
+      </ScrollView>
+
+      {session && <SessionPlayer />}
+    </SafeAreaView>
+  );
+}
+
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
+  topbar: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 20, paddingTop: 14, paddingBottom: 8,
+  },
+  title: { fontSize: 22, fontWeight: '800', color: colors.ink, letterSpacing: -0.3 },
+  meta: { fontSize: 10, color: colors.muted, letterSpacing: 1 },
+  empty: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, gap: 16 },
+  emptyTxt: { color: colors.muted, fontSize: 14, textAlign: 'center', lineHeight: 22 },
+  emptyBtn: { backgroundColor: colors.ink, borderRadius: 12, paddingHorizontal: 22, paddingVertical: 12 },
+  emptyBtnTxt: { color: colors.bg, fontSize: 14, fontWeight: '700' },
+
+  routineBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    marginHorizontal: 16, marginBottom: 12, padding: 14,
+    backgroundColor: colors.panel2, borderRadius: 14,
+    borderWidth: 1, borderColor: colors.line2,
+  },
+  routineName: { fontSize: 14, fontWeight: '700', color: colors.ink },
+  routineSub: { fontSize: 11, color: colors.muted, marginTop: 3 },
+  routineLink: { fontSize: 11.5, color: colors.mid, fontWeight: '600' },
+
+  pillScroll: { flexGrow: 0 },
+  pillContent: { paddingHorizontal: 16, paddingBottom: 14, gap: 8, flexDirection: 'row' },
+  pill: {
+    backgroundColor: colors.panel2, borderRadius: 14,
+    paddingHorizontal: 16, paddingVertical: 10,
+    borderWidth: 1, borderColor: colors.line, alignItems: 'center', minWidth: 80,
+  },
+  pillActive: { backgroundColor: colors.ink, borderColor: colors.ink },
+  pillTxt: { fontSize: 11, fontWeight: '700', color: colors.muted, letterSpacing: 0.5 },
+  pillTxtActive: { color: colors.bg },
+  pillSub: { fontSize: 10.5, color: colors.muted, marginTop: 2 },
+  pillSubActive: { color: 'rgba(9,9,10,0.6)' },
+
+  scroll: { flex: 1 },
+  scrollInner: { paddingHorizontal: 16, paddingBottom: 36 },
+  dayHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12 },
+  dayName: { fontSize: 22, fontWeight: '800', color: colors.ink, letterSpacing: -0.3 },
+  dayFocus: { fontSize: 12, color: colors.muted, marginTop: 3 },
+  startBtn: { backgroundColor: colors.ink, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 11 },
+  startBtnTxt: { color: colors.bg, fontSize: 13, fontWeight: '700' },
+
+  exCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: colors.panel, borderRadius: 16, padding: 12,
+    marginBottom: 10, borderWidth: 1, borderColor: colors.line,
+  },
+  exThumb: { width: 56, height: 56 },
+  exInfo: { flex: 1 },
+  exOrder: { fontSize: 9, fontWeight: '800', color: colors.muted, letterSpacing: 1 },
+  exName: { fontSize: 15, fontWeight: '600', color: colors.ink, marginTop: 2 },
+  exPart: { fontSize: 11, color: colors.muted, marginTop: 3 },
+  exSetsWrap: { alignItems: 'center', minWidth: 42 },
+  exSetsNum: { fontSize: 20, fontWeight: '800', color: colors.ink, lineHeight: 24 },
+  exSetsSub: { fontSize: 9.5, color: colors.muted, letterSpacing: 0.5 },
+  exRep: { fontSize: 11, color: colors.mid, marginTop: 2 },
+
+  regenRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
+});

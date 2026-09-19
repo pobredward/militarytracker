@@ -1,245 +1,225 @@
-import { useEffect } from 'react';
 import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  ActivityIndicator,
-  RefreshControl,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { colors } from '../../src/utils/colors';
+import { useAppStore } from '../../src/stores/appStore';
 import { useAuthStore } from '../../src/stores/authStore';
-import { useWorkoutStore } from '../../src/stores/workoutStore';
-import { getTodayWorkout } from '../../src/services/workoutService';
-import { Colors } from '../../src/utils/colors';
-import { formatDate, getProgressPercent } from '../../src/utils/formatters';
+import { FEED } from '../../src/data/feed';
+import { exById } from '../../src/data/exercises';
+import SessionPlayer from '../../src/components/SessionPlayer';
+import ExerciseMedia from '../../src/components/ExerciseMedia';
+import { nextDayIdx, weekStreak, currentStreakDays, totalSets } from '../../src/utils/stats';
 
-interface StatCardProps {
-  emoji: string;
-  label: string;
-  current: number;
-  goal: number;
-  unit: string;
-}
-
-function StatCard({ emoji, label, current, goal, unit }: StatCardProps) {
-  const pct = getProgressPercent(current, goal);
-  return (
-    <View style={styles.statCard}>
-      <View style={styles.statHeader}>
-        <Text style={styles.statEmoji}>{emoji}</Text>
-        <View style={styles.statInfo}>
-          <Text style={styles.statLabel}>{label}</Text>
-          <Text style={styles.statValue}>
-            {current.toLocaleString()}
-            <Text style={styles.statUnit}>{unit}</Text>
-          </Text>
-        </View>
-        <View style={[styles.pctBadge, pct >= 100 && styles.pctBadgeDone]}>
-          <Text style={[styles.pctText, pct >= 100 && styles.pctTextDone]}>{pct}%</Text>
-        </View>
-      </View>
-      <View style={styles.progressBar}>
-        <View
-          style={[
-            styles.progressFill,
-            { width: `${pct}%` as any },
-            pct >= 100 && styles.progressFillDone,
-          ]}
-        />
-      </View>
-      <Text style={styles.goalText}>
-        목표: {goal.toLocaleString()}
-        {unit}
-      </Text>
-    </View>
-  );
-}
+const DOW = ['월', '화', '수', '목', '금', '토', '일'];
 
 export default function HomeScreen() {
+  const router = useRouter();
   const { user } = useAuthStore();
-  const { todayWorkout, goal, isLoading, setTodayWorkout, setLoading } = useWorkoutStore();
+  const { plan, logs, session, startSession } = useAppStore();
 
-  async function loadTodayWorkout() {
-    if (!user) return;
-    setLoading(true);
-    try {
-      const workout = await getTodayWorkout(user.uid);
-      setTodayWorkout(workout);
-    } finally {
-      setLoading(false);
-    }
+  const today = new Date().toLocaleDateString('ko-KR', {
+    month: '2-digit', day: '2-digit', weekday: 'short',
+  });
+
+  if (!plan) {
+    return (
+      <SafeAreaView style={s.root} edges={['top']}>
+        <View style={s.empty}>
+          <Text style={s.emptyTxt}>아직 플랜이 없습니다.</Text>
+          <TouchableOpacity style={s.emptyBtn} onPress={() => router.push('/routine')}>
+            <Text style={s.emptyBtnTxt}>루틴 선택하기</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
   }
 
-  useEffect(() => {
-    loadTodayWorkout();
-  }, [user]);
+  const dayIdx = nextDayIdx(logs, plan);
+  const day = plan.days[dayIdx];
+  const streak = weekStreak(logs);
+  const streakDays = currentStreakDays(logs);
+  const weekSets = totalSets(logs, { weekOnly: true });
 
-  const today = new Date().toISOString();
-  const w = todayWorkout;
+  const lastLog = logs[0];
+  const comment = lastLog
+    ? `최근 ${lastLog.dayName}에서 ${lastLog.totalSets}세트를 완료했습니다. 오늘은 ${day.name} 차례예요.`
+    : `오늘은 ${day.name}입니다. 무게는 12회를 안정적으로 수행 가능한 수준으로 시작하세요.`;
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView
-        style={styles.container}
-        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={loadTodayWorkout} />}
-      >
-        <View style={styles.headerBg}>
-          <Text style={styles.greeting}>안녕하세요, {user?.displayName ?? '전우'}님 👋</Text>
-          <Text style={styles.date}>{formatDate(today)}</Text>
+    <SafeAreaView style={s.root} edges={['top']}>
+      <View style={s.topbar}>
+        <Text style={s.logo}>MILITARYTRACKER</Text>
+        <Text style={s.meta}>{today}</Text>
+      </View>
+
+      <ScrollView style={s.scroll} contentContainerStyle={s.scrollInner} showsVerticalScrollIndicator={false}>
+        {/* Hero */}
+        <View style={s.heroCard}>
+          <View style={s.heroTopRow}>
+            <View style={s.heroBadge}>
+              <Text style={s.heroBadgeTxt}>DAY {dayIdx + 1} / {plan.days.length}</Text>
+            </View>
+            {plan.routineId && (
+              <TouchableOpacity onPress={() => router.push(`/routine/${plan.routineId}`)}>
+                <Text style={s.heroLink}>루틴 보기 ›</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <Text style={s.heroName}>{day.name}</Text>
+          <Text style={s.heroFocus}>{day.focus}</Text>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.heroThumbs} contentContainerStyle={s.heroThumbsInner}>
+            {day.ids.map((id, i) => (
+              <TouchableOpacity key={`${id}-${i}`} onPress={() => router.push(`/exercise/${id}`)} activeOpacity={0.8}>
+                <ExerciseMedia exId={id} rounded={10} style={s.heroThumb} dim={0.35} />
+                <Text style={s.heroThumbTxt} numberOfLines={1}>{exById(id)?.n ?? ''}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <TouchableOpacity style={s.startBtn} onPress={() => startSession(dayIdx)}>
+            <Text style={s.startBtnTxt}>▶  운동 시작</Text>
+          </TouchableOpacity>
         </View>
 
-        {isLoading && !w ? (
-          <ActivityIndicator size="large" color={Colors.primary} style={{ marginTop: 40 }} />
-        ) : (
-          <View style={styles.content}>
-            <Text style={styles.sectionTitle}>오늘의 운동 현황</Text>
-
-            {!w ? (
-              <View style={styles.emptyCard}>
-                <Text style={styles.emptyEmoji}>🏃‍♂️</Text>
-                <Text style={styles.emptyText}>아직 오늘의 운동 기록이 없어요</Text>
-                <Text style={styles.emptySubText}>운동 탭에서 기록을 시작하세요!</Text>
-              </View>
-            ) : (
-              <>
-                <StatCard
-                  emoji="🏋️"
-                  label="스쿼트"
-                  current={w.squatCount}
-                  goal={goal.squats}
-                  unit="회"
-                />
-                <StatCard
-                  emoji="🦵"
-                  label="런지"
-                  current={w.lungeCount}
-                  goal={goal.lunges}
-                  unit="회"
-                />
-                <StatCard
-                  emoji="🚶"
-                  label="걷기"
-                  current={w.walkSteps}
-                  goal={goal.walkSteps}
-                  unit="보"
-                />
-                <StatCard
-                  emoji="🏃"
-                  label="달리기"
-                  current={w.runDistance}
-                  goal={goal.runDistance}
-                  unit="km"
-                />
-              </>
-            )}
-
-            <Text style={styles.sectionTitle}>전체 통계</Text>
-            <View style={styles.totalGrid}>
-              {[
-                { label: '운동일', value: user?.workoutDays ?? 0, unit: '일', emoji: '📅' },
-                { label: '총 스쿼트', value: user?.totalSquats ?? 0, unit: '회', emoji: '🏋️' },
-                { label: '총 런지', value: user?.totalLunges ?? 0, unit: '회', emoji: '🦵' },
-                { label: '총 걷기', value: user?.totalWalkSteps ?? 0, unit: '보', emoji: '🚶' },
-              ].map((item) => (
-                <View key={item.label} style={styles.totalCard}>
-                  <Text style={styles.totalEmoji}>{item.emoji}</Text>
-                  <Text style={styles.totalValue}>{item.value.toLocaleString()}</Text>
-                  <Text style={styles.totalUnit}>{item.unit}</Text>
-                  <Text style={styles.totalLabel}>{item.label}</Text>
-                </View>
-              ))}
-            </View>
+        {/* Streak */}
+        <View style={s.card}>
+          <View style={s.cardHead}>
+            <Text style={s.sectionLabel}>THIS WEEK</Text>
+            <Text style={s.cardMeta}>
+              {weekSets}세트{streakDays > 0 ? ` · ${streakDays}일 연속` : ''}
+            </Text>
           </View>
-        )}
+          <View style={s.streakRow}>
+            {DOW.map((d, i) => (
+              <View key={i} style={[s.streakCell, streak[i] && s.streakOn]}>
+                <Text style={[s.streakDay, streak[i] && s.streakDayOn]}>{d}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        {/* Coach */}
+        <View style={s.card}>
+          <Text style={s.sectionLabel}>COACH</Text>
+          <Text style={s.commentTxt}>{comment}</Text>
+        </View>
+
+        {/* Library */}
+        <View style={s.secRow}>
+          <Text style={s.secTitle}>라이브러리</Text>
+          <Text style={s.secMeta}>{FEED.length} 시리즈</Text>
+        </View>
+        <View style={s.grid}>
+          {FEED.map((f) => (
+            <TouchableOpacity
+              key={f.id}
+              style={s.gridCard}
+              activeOpacity={0.75}
+              onPress={() => router.push(`/library/${f.id}`)}
+            >
+              <View style={s.gridThumb}>
+                <Image source={f.img} style={s.gridThumbImg} resizeMode="cover" />
+                <View style={s.gridThumbOverlay} />
+                <View style={s.gridBadge}>
+                  <Text style={s.gridBadgeTxt}>{f.cnt}</Text>
+                </View>
+              </View>
+              <Text style={s.gridName} numberOfLines={2}>{f.n}</Text>
+              <Text style={s.gridPart}>{f.part}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </ScrollView>
+
+      {session && <SessionPlayer />}
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.primary },
-  container: { flex: 1, backgroundColor: Colors.background },
-  headerBg: {
-    backgroundColor: Colors.primary,
-    padding: 24,
-    paddingBottom: 32,
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
+  topbar: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 20, paddingTop: 14, paddingBottom: 8,
   },
-  greeting: { fontSize: 22, fontWeight: '800', color: Colors.white },
-  date: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 4 },
-  content: { padding: 16, marginTop: -12 },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.text,
-    marginBottom: 12,
-    marginTop: 8,
+  logo: { fontSize: 13, fontWeight: '800', color: colors.ink, letterSpacing: 2.5 },
+  meta: { fontSize: 10, color: colors.muted, letterSpacing: 1 },
+  scroll: { flex: 1 },
+  scrollInner: { paddingHorizontal: 16, paddingBottom: 36 },
+  empty: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 },
+  emptyTxt: { color: colors.muted, fontSize: 14 },
+  emptyBtn: {
+    backgroundColor: colors.ink, borderRadius: 12,
+    paddingHorizontal: 22, paddingVertical: 12,
   },
-  statCard: {
-    backgroundColor: Colors.white,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
+  emptyBtnTxt: { color: colors.bg, fontSize: 14, fontWeight: '700' },
+
+  heroCard: {
+    backgroundColor: colors.panel2, borderRadius: 20, padding: 20,
+    marginBottom: 12, borderWidth: 1, borderColor: colors.line2,
   },
-  statHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  statEmoji: { fontSize: 28, marginRight: 12 },
-  statInfo: { flex: 1 },
-  statLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: '600' },
-  statValue: { fontSize: 22, fontWeight: '800', color: Colors.text },
-  statUnit: { fontSize: 13, color: Colors.textSecondary, fontWeight: '400' },
-  pctBadge: {
-    backgroundColor: Colors.surfaceAlt,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+  heroTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+  heroBadge: {
+    alignSelf: 'flex-start', backgroundColor: colors.panel3,
+    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4,
   },
-  pctBadgeDone: { backgroundColor: Colors.success },
-  pctText: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary },
-  pctTextDone: { color: Colors.white },
-  progressBar: {
-    height: 6,
-    backgroundColor: Colors.surfaceAlt,
-    borderRadius: 3,
-    overflow: 'hidden',
-    marginBottom: 6,
+  heroBadgeTxt: { fontSize: 10, fontWeight: '700', color: colors.muted, letterSpacing: 1.5 },
+  heroLink: { fontSize: 11.5, color: colors.mid, fontWeight: '600' },
+  heroName: { fontSize: 26, fontWeight: '800', color: colors.ink, letterSpacing: -0.5, marginBottom: 4 },
+  heroFocus: { fontSize: 13, color: colors.muted, marginBottom: 14 },
+  heroThumbs: { flexGrow: 0, marginBottom: 16, marginHorizontal: -4 },
+  heroThumbsInner: { gap: 8, paddingHorizontal: 4 },
+  heroThumb: { width: 72, height: 72 },
+  heroThumbTxt: { fontSize: 9.5, color: colors.muted, marginTop: 5, width: 72, textAlign: 'center' },
+  startBtn: { backgroundColor: colors.ink, borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
+  startBtnTxt: { color: colors.bg, fontSize: 15, fontWeight: '700', letterSpacing: 0.3 },
+
+  card: {
+    backgroundColor: colors.panel, borderRadius: 18, padding: 18,
+    marginBottom: 12, borderWidth: 1, borderColor: colors.line,
   },
-  progressFill: {
-    height: '100%',
-    backgroundColor: Colors.primaryLight,
-    borderRadius: 3,
+  cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  cardMeta: { fontSize: 10.5, color: colors.mid, marginBottom: 14 },
+  sectionLabel: {
+    fontSize: 9.5, fontWeight: '800', color: colors.muted,
+    letterSpacing: 2, marginBottom: 14,
   },
-  progressFillDone: { backgroundColor: Colors.success },
-  goalText: { fontSize: 11, color: Colors.textMuted },
-  emptyCard: {
-    backgroundColor: Colors.white,
-    borderRadius: 16,
-    padding: 32,
-    alignItems: 'center',
-    marginBottom: 12,
+  streakRow: { flexDirection: 'row', gap: 5 },
+  streakCell: {
+    flex: 1, aspectRatio: 1, borderRadius: 8,
+    backgroundColor: colors.panel3, borderWidth: 1, borderColor: colors.line,
+    alignItems: 'center', justifyContent: 'center',
   },
-  emptyEmoji: { fontSize: 48, marginBottom: 12 },
-  emptyText: { fontSize: 15, fontWeight: '600', color: Colors.text },
-  emptySubText: { fontSize: 13, color: Colors.textSecondary, marginTop: 4 },
-  totalGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  totalCard: {
-    backgroundColor: Colors.white,
-    borderRadius: 14,
-    padding: 16,
-    alignItems: 'center',
-    width: '47.5%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
+  streakOn: { backgroundColor: colors.ink, borderColor: colors.ink },
+  streakDay: { fontSize: 10, color: colors.muted, fontWeight: '600' },
+  streakDayOn: { color: colors.bg, fontWeight: '700' },
+  commentTxt: { fontSize: 14, color: colors.mid, lineHeight: 22 },
+
+  secRow: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'baseline', marginBottom: 12, marginTop: 6,
   },
-  totalEmoji: { fontSize: 24, marginBottom: 6 },
-  totalValue: { fontSize: 20, fontWeight: '800', color: Colors.primary },
-  totalUnit: { fontSize: 11, color: Colors.textSecondary },
-  totalLabel: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  secTitle: { fontSize: 17, fontWeight: '700', color: colors.ink },
+  secMeta: { fontSize: 11, color: colors.muted },
+
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  gridCard: { width: '47.5%' },
+  gridThumb: {
+    aspectRatio: 1, borderRadius: 16, backgroundColor: colors.panel2,
+    marginBottom: 8, overflow: 'hidden', justifyContent: 'flex-end', padding: 10,
+  },
+  gridThumbImg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%' },
+  gridThumbOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.35)' },
+  gridBadge: {
+    alignSelf: 'flex-start', backgroundColor: 'rgba(0,0,0,0.62)',
+    borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3,
+    borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.12)',
+  },
+  gridBadgeTxt: { fontSize: 9.5, color: colors.mid, fontWeight: '600' },
+  gridName: { fontSize: 12.5, fontWeight: '600', color: colors.ink, lineHeight: 17, marginBottom: 3 },
+  gridPart: { fontSize: 11, color: colors.muted },
 });
