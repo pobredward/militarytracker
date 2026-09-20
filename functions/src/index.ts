@@ -4,6 +4,9 @@
  * 앱은 Anthropic API 를 직접 호출하지 않는다. 키는 Secret Manager 에만 존재한다.
  *   firebase functions:secrets:set ANTHROPIC_API_KEY
  *   firebase deploy --only functions
+ *
+ * secret 버전을 지운 뒤에는 반드시 함수를 재배포해야 한다. 각 함수는 배포
+ * 시점의 secret 버전에 고정되며, CLI 는 소스 해시가 같으면 배포를 건너뛴다.
  */
 import { onCall, HttpsError, CallableRequest } from 'firebase-functions/v2/https';
 import { setGlobalOptions } from 'firebase-functions/v2';

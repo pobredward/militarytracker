@@ -38,3 +38,9 @@ git fetch origin        # origin/main 추적 참조 동기화 (위 push 는 갱�
 - **`functions/src/subscription.ts` 의 `onCall` 은 `region` 을 명시**해야 한다.
   `index.ts` 의 `setGlobalOptions` 는 import 된 모듈 본문보다 늦게 실행된다.
 - 배포는 **규칙 먼저, 함수 나중**. 순서를 바꾸면 그 사이에 클라이언트가 `sub` 를 쓸 수 있다.
+- **secret 버전은 배포 시점에 함수에 고정된다.** 최신 버전을 쓸 거라고 가정하지 말 것.
+  `functions:secrets:destroy KEY@N` 을 `--force` 없이 먼저 돌려 어떤 함수가 그 버전을
+  쓰는지 경고를 읽고, 사용 중이면 함수를 먼저 재배포해 새 버전에 묶은 뒤 지운다.
+  `functions:secrets:prune` 는 버전 단위로 정리해 주지 않는다.
+  재배포는 소스 해시가 같으면 통째로 건너뛴다("No changes detected") — 바인딩만
+  바꾸려면 소스를 한 줄이라도 바꿔야 한다.
