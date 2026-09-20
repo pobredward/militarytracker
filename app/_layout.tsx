@@ -5,6 +5,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { onAuthChange, fetchUserProfile, fetchPlan } from '../src/services/authService';
 import { getWorkoutLogs, getWeights, saveWorkoutLog } from '../src/services/workoutService';
+import { refreshSub } from '../src/services/billingService';
 import { useAuthStore } from '../src/stores/authStore';
 import { useAppStore } from '../src/stores/appStore';
 import MobileFrame from '../src/components/MobileFrame';
@@ -13,7 +14,7 @@ import MobileFrame from '../src/components/MobileFrame';
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {
-  const { setUser, setInitialized, isInitialized, user } = useAuthStore();
+  const { setUser, patchUser, setInitialized, isInitialized, user } = useAuthStore();
   const { setOwner, setProfile, setPlan, setLogs, setWeights, resetAll, addLog, dropPending } = useAppStore();
   const router = useRouter();
   const segments = useSegments();
@@ -56,14 +57,18 @@ export default function RootLayout() {
         if (profile.profile) setProfile(profile.profile);
 
         // 하나가 실패해도 나머지는 살린다
-        const [planR, logsR, weightsR] = await Promise.allSettled([
+        const [planR, logsR, weightsR, subR] = await Promise.allSettled([
           fetchPlan(firebaseUser.uid),
           getWorkoutLogs(firebaseUser.uid, 60),
           getWeights(firebaseUser.uid, 30),
+          // 만료된 구독을 서버가 정리하고 최신 상태를 돌려준다.
+          // 함수가 아직 배포되지 않았으면 null 이라 문서에서 읽은 값을 그대로 쓴다.
+          refreshSub(),
         ]);
         if (planR.status === 'fulfilled' && planR.value) setPlan(planR.value);
         if (logsR.status === 'fulfilled') setLogs(logsR.value);
         if (weightsR.status === 'fulfilled') setWeights(weightsR.value);
+        if (subR.status === 'fulfilled' && subR.value) patchUser({ sub: subR.value });
 
         // 지난번에 서버 저장이 실패한 운동 기록을 재시도한다
         const pending = useAppStore.getState().pendingLogs;
@@ -98,7 +103,8 @@ export default function RootLayout() {
       return;
     }
     if (!user.onboardingDone) {
-      if (root !== 'onboard') router.replace('/onboard');
+      // 온보딩 마지막 단계에서 구독 화면을 띄울 수 있어야 하므로 예외로 둔다
+      if (root !== 'onboard' && root !== 'subscribe') router.replace('/onboard');
       return;
     }
     // 로그인 + 온보딩 완료 상태에서 진입점/인증 화면에 있으면 홈으로
@@ -121,6 +127,7 @@ export default function RootLayout() {
         <Stack.Screen name="library" />
         <Stack.Screen name="history" />
         <Stack.Screen name="profile" />
+        <Stack.Screen name="subscribe" options={{ presentation: 'modal' }} />
       </Stack>
       </MobileFrame>
     </SafeAreaProvider>

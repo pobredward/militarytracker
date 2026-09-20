@@ -3,6 +3,29 @@ import type { Part, Place } from '../data/exercises';
 // ─── Auth / User ───────────────────────────────────────────────────────────
 export type Role = 'user' | 'admin';
 
+// ─── Subscription ──────────────────────────────────────────────────────────
+export type PlanTier = 'free' | 'pro';
+/** canceled = 해지했지만 기간은 남음, grace = 결제 실패 유예 */
+export type SubStatus = 'none' | 'trial' | 'active' | 'grace' | 'expired' | 'canceled';
+export type SubSource = 'none' | 'ios' | 'android' | 'promo' | 'admin';
+
+/**
+ * users/{uid}.sub — 서버(Cloud Functions)만 쓴다.
+ * 보안 규칙이 클라이언트의 sub 수정을 막고 있으므로, 앱에서 이 값을 바꿔도
+ * 저장되지 않는다. 실제 권한 판정도 서버가 다시 한다.
+ */
+export interface Subscription {
+  tier: PlanTier;
+  status: SubStatus;
+  /** ISO. null 이면 만료 없음(관리자 지급) */
+  expiresAt: string | null;
+  source: SubSource;
+  productId: string | null;
+  /** 무료 체험을 이미 사용했는지 — 재발급 방지 */
+  trialUsed: boolean;
+  updatedAt: string;
+}
+
 export interface User {
   uid: string;
   email: string | null;
@@ -14,6 +37,8 @@ export interface User {
   onboardingDone: boolean;
   /** 온보딩에서 저장된 신체·목표 정보 (콜드스타트 시 복원용) */
   profile?: UserProfile | null;
+  /** 구독 상태 — 서버 전용 필드 */
+  sub?: Subscription | null;
   createdAt: string;
   lastLoginAt: string;
 }

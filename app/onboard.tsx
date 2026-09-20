@@ -10,7 +10,9 @@ import { UserProfile } from '../src/types';
 import { useAuthStore } from '../src/stores/authStore';
 import { useAppStore } from '../src/stores/appStore';
 import { saveOnboarding } from '../src/services/authService';
-import { generatePlan } from '../src/services/aiService';
+import { generatePlan, SubscriptionRequired } from '../src/services/aiService';
+import { useEntitlement } from '../src/hooks/useEntitlement';
+import { ProBadge } from '../src/components/ProLock';
 import { planFromRoutine } from '../src/utils/planner';
 import { ROUTINES, recommendRoutine, routineExCount } from '../src/data/routines';
 
@@ -35,7 +37,15 @@ export default function OnboardScreen() {
   }
 
   const canNext = step === 0 ? !!(p.age && p.height && p.weight) : true;
-  const recommended = recommendRoutine({ place: p.env, days: p.days, level: p.level });
+
+  // 루틴 추천과 AI 구성은 구독 기능이다.
+  // 구독 전에는 추천 배지도 정렬도 걸지 않는다 — 보여 주면 이미 준 것이다.
+  const { can } = useEntitlement();
+  const canAI = can('ai_plan');
+  const canReco = can('routine_reco');
+  const recommendedId = canReco
+    ? recommendRoutine({ place: p.env, days: p.days, level: p.level }).id
+    : null;
 
   async function choosePreset(routineId: string) {
     if (!user || loading) return;
@@ -57,6 +67,10 @@ export default function OnboardScreen() {
 
   async function chooseAI() {
     if (!user || loading) return;
+    if (!canAI) {
+      router.push('/subscribe?f=ai_plan');
+      return;
+    }
     setLoading('ai');
     try {
       const plan = await generatePlan(p);
@@ -65,8 +79,9 @@ export default function OnboardScreen() {
       setPlan(plan);
       patchUser({ onboardingDone: true, profile: p });
       router.replace('/tabs/home');
-    } catch {
-      showAlert('오류', '플랜 생성에 실패했습니다. 다시 시도해주세요.');
+    } catch (e) {
+      if (e instanceof SubscriptionRequired) router.push('/subscribe?f=ai_plan');
+      else showAlert('오류', '플랜 생성에 실패했습니다. 다시 시도해주세요.');
     } finally {
       setLoading(null);
     }
@@ -87,7 +102,9 @@ export default function OnboardScreen() {
         {step === 3 && <Step4 p={p} update={update} />}
         {step === 4 && (
           <StepRoutine
-            recommendedId={recommended.id}
+            recommendedId={recommendedId}
+            canAI={canAI}
+            onReco={() => router.push('/subscribe?f=routine_reco')}
             place={p.env}
             loading={loading}
             onPreset={choosePreset}
@@ -214,17 +231,22 @@ function Step4({ p, update }: { p: UserProfile; update: <K extends keyof UserPro
 
 // ─── Step 5: 루틴 선택 ──────────────────────────────────────────────────────
 function StepRoutine({
-  recommendedId, place, loading, onPreset, onAI,
+  recommendedId, canAI, place, loading, onPreset, onAI, onReco,
 }: {
-  recommendedId: string;
+  /** null 이면 추천이 잠겨 있다 — 배지도 정렬도 걸지 않는다 */
+  recommendedId: string | null;
+  canAI: boolean;
   place: UserProfile['env'];
   loading: string | null;
   onPreset: (id: string) => void;
   onAI: () => void;
+  onReco: () => void;
 }) {
   const list = [...ROUTINES].sort((a, b) => {
-    if (a.id === recommendedId) return -1;
-    if (b.id === recommendedId) return 1;
+    if (recommendedId) {
+      if (a.id === recommendedId) return -1;
+      if (b.id === recommendedId) return 1;
+    }
     const aFit = a.place.includes(place) ? 0 : 1;
     const bFit = b.place.includes(place) ? 0 : 1;
     return aFit - bFit;
@@ -241,23 +263,37 @@ function StepRoutine({
           <ActivityIndicator color={colors.bg} />
         ) : (
           <>
-            <Text style={s.aiTitle}>AI 맞춤 구성</Text>
-            <Text style={s.aiSub}>입력한 정보로 종목까지 직접 골라 드립니다</Text>
+            <View style={s.aiHead}>
+              <Text style={s.aiTitle}>AI 맞춤 구성</Text>
+              {!canAI && <View style={s.aiPro}><Text style={s.aiProTxt}>PRO</Text></View>}
+            </View>
+            <Text style={s.aiSub}>
+              {canAI
+                ? '입력한 정보로 종목까지 직접 골라 드립니다'
+                : '구독 기능입니다. 아래 루틴은 지금 바로 무료로 쓸 수 있어요'}
+            </Text>
           </>
         )}
       </TouchableOpacity>
+
+      {!recommendedId && (
+        <TouchableOpacity style={s.recoLock} onPress={onReco} disabled={!!loading}>
+          <Text style={s.recoLockTxt}>내 조건에 맞는 루틴 추천받기</Text>
+          <ProBadge />
+        </TouchableOpacity>
+      )}
 
       <Text style={s.label}>루틴 라이브러리</Text>
       {list.map((r) => (
         <TouchableOpacity
           key={r.id}
-          style={[s.rCard, r.id === recommendedId && s.rCardRec, loading === r.id && s.btnOff]}
+          style={[s.rCard, !!recommendedId && r.id === recommendedId && s.rCardRec, loading === r.id && s.btnOff]}
           onPress={() => onPreset(r.id)}
           disabled={!!loading}
         >
           <View style={s.rHead}>
             <Text style={s.rName}>{r.name}</Text>
-            {r.id === recommendedId && (
+            {!!recommendedId && r.id === recommendedId && (
               <View style={s.recBadge}><Text style={s.recBadgeTxt}>추천</Text></View>
             )}
           </View>
@@ -335,8 +371,20 @@ const s = StyleSheet.create({
     backgroundColor: colors.ink, borderRadius: 16, padding: 18,
     alignItems: 'center', marginTop: 4, minHeight: 78, justifyContent: 'center',
   },
+  aiHead: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   aiTitle: { fontSize: 16, fontWeight: '800', color: colors.bg },
-  aiSub: { fontSize: 12, color: 'rgba(9,9,10,0.65)', marginTop: 4 },
+  aiPro: {
+    backgroundColor: 'rgba(9,9,10,0.14)', borderRadius: 5,
+    paddingHorizontal: 6, paddingVertical: 2,
+  },
+  aiProTxt: { fontSize: 8.5, fontWeight: '800', color: 'rgba(9,9,10,0.7)', letterSpacing: 0.6 },
+  aiSub: { fontSize: 12, color: 'rgba(9,9,10,0.65)', marginTop: 4, lineHeight: 18 },
+  recoLock: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+    backgroundColor: colors.panel2, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14,
+    borderWidth: 1, borderColor: colors.line2, marginTop: 10,
+  },
+  recoLockTxt: { fontSize: 13, fontWeight: '600', color: colors.mid, flexShrink: 1 },
 
   rCard: {
     backgroundColor: colors.panel, borderRadius: 16, padding: 16,

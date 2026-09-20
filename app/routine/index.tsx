@@ -4,14 +4,19 @@ import { colors } from '../../src/utils/colors';
 import { Screen, TopBar, Body, SectionLabel } from '../../src/components/ui';
 import { ROUTINES, recommendRoutine, routineExCount } from '../../src/data/routines';
 import { useAppStore } from '../../src/stores/appStore';
+import { useEntitlement } from '../../src/hooks/useEntitlement';
+import { ProBadge } from '../../src/components/ProLock';
 
 export default function RoutineListScreen() {
   const router = useRouter();
   const { profile, plan } = useAppStore();
 
-  const recommendedId = profile
+  // 추천은 구독 기능 — 구독 전에는 배지를 걸지 않는다
+  const { can } = useEntitlement();
+  const canReco = can('routine_reco');
+  const recommendedId = canReco && profile
     ? recommendRoutine({ place: profile.env, days: profile.days, level: profile.level }).id
-    : 'ppl';
+    : null;
 
   return (
     <Screen>
@@ -20,6 +25,13 @@ export default function RoutineListScreen() {
         <Text style={s.lead}>
           분할 방식을 고르면 데이별 종목까지 바로 확인할 수 있습니다.
         </Text>
+
+        {!canReco && (
+          <TouchableOpacity style={s.recoLock} onPress={() => router.push('/subscribe?f=routine_reco')}>
+            <Text style={s.recoLockTxt}>내 조건에 맞는 루틴 추천받기</Text>
+            <ProBadge />
+          </TouchableOpacity>
+        )}
 
         <SectionLabel>전체 루틴 {ROUTINES.length}개</SectionLabel>
         {ROUTINES.map((r) => {
@@ -66,6 +78,12 @@ export default function RoutineListScreen() {
 
 const s = StyleSheet.create({
   lead: { fontSize: 13, color: colors.muted, lineHeight: 20, marginTop: 4 },
+  recoLock: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+    backgroundColor: colors.panel2, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14,
+    borderWidth: 1, borderColor: colors.line2, marginTop: 14,
+  },
+  recoLockTxt: { fontSize: 13, fontWeight: '600', color: colors.mid, flexShrink: 1 },
   card: {
     backgroundColor: colors.panel, borderRadius: 18, padding: 16,
     borderWidth: 1, borderColor: colors.line, marginBottom: 10,

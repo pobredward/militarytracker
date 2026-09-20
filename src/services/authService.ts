@@ -13,6 +13,7 @@ import { auth, db } from './firebase';
 import { User, UserProfile, Plan } from '../types';
 import { deleteAllUserData } from './workoutService';
 import { normalizePlan } from '../utils/planner';
+import { normalizeSub } from '../utils/subscription';
 
 const nowIso = () => new Date().toISOString();
 
@@ -84,6 +85,8 @@ function normalizeUser(uid: string, data: Record<string, unknown> | undefined): 
     role: d.role === 'admin' ? 'admin' : 'user',
     onboardingDone: d.onboardingDone ?? false,
     profile: d.profile ?? null,
+    // 구독은 서버(Cloud Functions)만 쓴다 — 여기서는 읽기만 한다
+    sub: normalizeSub(d.sub),
     createdAt: d.createdAt ?? nowIso(),
     lastLoginAt: d.lastLoginAt ?? nowIso(),
   };

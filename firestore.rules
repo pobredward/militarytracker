@@ -46,14 +46,24 @@ service cloud.firestore {
              request.resource.data.role == resource.data.role;
     }
 
+    // sub(구독) 필드도 본인이 바꿀 수 없다.
+    // Cloud Functions 는 Admin SDK 라 이 규칙을 통과하지 않는다 —
+    // 즉 앱을 뜯어 고쳐도 스스로 PRO 가 될 수 없다.
+    function subUnchanged() {
+      return !('sub' in request.resource.data) ||
+             (('sub' in resource.data) && request.resource.data.sub == resource.data.sub);
+    }
+
     // ── users ─────────────────────────────────────────────────────────────
     match /users/{userId} {
       allow get: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
 
-      // 가입 시 본인 문서 생성 — 스스로 admin 을 부여할 수 없다
-      allow create: if (isOwner(userId) && request.resource.data.role == 'user') || isAdmin();
-      allow update: if (isOwner(userId) && roleUnchanged()) || isAdmin();
+      // 가입 시 본인 문서 생성 — 스스로 admin 이나 구독을 부여할 수 없다
+      allow create: if (isOwner(userId)
+                        && request.resource.data.role == 'user'
+                        && !('sub' in request.resource.data)) || isAdmin();
+      allow update: if (isOwner(userId) && roleUnchanged() && subUnchanged()) || isAdmin();
       allow delete: if isOwner(userId) || isAdmin();
     }
 
@@ -78,6 +88,13 @@ service cloud.firestore {
       allow update: if (ownsExisting() && ownsIncoming()) || isAdmin();
       allow delete: if isAdmin() || ownsExisting();
     }
+
+    // ── 구독 관련 컬렉션 ──────────────────────────────────────────────────
+    // promoCodes / promoRedemptions / subEvents 는 전부 Cloud Functions(Admin SDK)
+    // 전용이다. 앱에서는 읽지도 쓰지도 않는다 — 코드 목록이 노출되면 안 된다.
+    match /promoCodes/{code} { allow read, write: if isAdmin(); }
+    match /promoRedemptions/{id} { allow read, write: if isAdmin(); }
+    match /subEvents/{id} { allow read, write: if isAdmin(); }
 
     // ── 그 외 모든 경로 ───────────────────────────────────────────────────
     // 정의되지 않은 컬렉션은 관리자만 접근 가능

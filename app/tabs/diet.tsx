@@ -8,7 +8,9 @@ import { showAlert } from '../../src/utils/alert';
 import { useAppStore } from '../../src/stores/appStore';
 import { useAuthStore } from '../../src/stores/authStore';
 import { calcBodyStats, effectiveWeight, FOOD_LABEL, GOAL_LABEL } from '../../src/utils/body';
-import { generateDiet } from '../../src/services/aiService';
+import { generateDiet, SubscriptionRequired } from '../../src/services/aiService';
+import { useEntitlement } from '../../src/hooks/useEntitlement';
+import { ProLock, ProBadge } from '../../src/components/ProLock';
 import { saveProfile } from '../../src/services/authService';
 import { localDate } from '../../src/services/workoutService';
 
@@ -26,6 +28,9 @@ export default function DietScreen() {
   const router = useRouter();
   const { user, patchUser } = useAuthStore();
   const { profile, weights, diet, dietLoading, setDiet, setDietLoading, setProfile } = useAppStore();
+  const { can } = useEntitlement();
+  // 목표 칼로리·매크로는 계속 무료다. 구독으로 열리는 건 '하루 식단 구성'.
+  const canDiet = can('ai_diet');
 
   const st = calcBodyStats(profile, weights);
   const eff = effectiveWeight(profile, weights);
@@ -34,11 +39,19 @@ export default function DietScreen() {
 
   async function genDiet() {
     if (!profile || dietLoading) return;
+    if (!canDiet) {
+      router.push('/subscribe?f=ai_diet');
+      return;
+    }
     setDietLoading(true);
     try {
       const next = await generateDiet(profile, st ?? undefined);
       if (next.src === 'AI' || !diet) setDiet({ ...next, createdAt: new Date().toISOString() });
       else showAlert('연결 실패', '식단을 새로 구성하지 못했습니다. 기존 식단을 유지합니다.');
+    } catch (e) {
+      // 화면을 띄워 둔 사이에 구독이 끝난 경우
+      if (e instanceof SubscriptionRequired) router.push('/subscribe?f=ai_diet');
+      else showAlert('오류', '식단을 구성하지 못했습니다. 잠시 후 다시 시도해주세요.');
     } finally {
       setDietLoading(false);
     }
@@ -122,6 +135,7 @@ export default function DietScreen() {
 
         <View style={s.sectionRow}>
           <Text style={s.sectionLabel}>하루 식단</Text>
+          {!canDiet && <ProBadge style={{ marginBottom: 12 }} />}
           <Text style={s.sectionSub}>
             {FOOD_LABEL[profile.food]} 기준
             {diet?.src === 'AI' ? ' · AI 구성' : ''}
@@ -152,27 +166,34 @@ export default function DietScreen() {
               <View style={s.tipCard}><Text style={s.tipTxt}>💡 {diet.tip}</Text></View>
             ) : null}
           </>
-        ) : (
+        ) : canDiet ? (
           <View style={s.emptyMeal}>
             <Text style={s.emptyMealTxt}>
               체형 · 목표 · 식사 환경에 맞는{'\n'}하루 식단을 구성합니다.
             </Text>
           </View>
+        ) : (
+          <ProLock
+            feature="ai_diet"
+            desc={`목표 ${st.kcal}kcal · 단백질 ${st.protein}g 에 맞춰 ${FOOD_LABEL[profile.food]} 기준 하루 식단을 구성합니다.`}
+          />
         )}
 
-        <TouchableOpacity
-          style={[s.genBtn, diet && !stale && s.genGhost, dietLoading && s.genOff]}
-          onPress={genDiet}
-          disabled={dietLoading}
-        >
-          {dietLoading ? (
-            <ActivityIndicator color={diet && !stale ? colors.mid : colors.bg} />
-          ) : (
-            <Text style={[s.genTxt, diet && !stale && s.genTxtGhost]}>
-              {diet ? '다시 구성' : '식단 생성'}
-            </Text>
-          )}
-        </TouchableOpacity>
+        {(canDiet || diet) && (
+          <TouchableOpacity
+            style={[s.genBtn, diet && !stale && s.genGhost, dietLoading && s.genOff]}
+            onPress={genDiet}
+            disabled={dietLoading}
+          >
+            {dietLoading ? (
+              <ActivityIndicator color={diet && !stale ? colors.mid : colors.bg} />
+            ) : (
+              <Text style={[s.genTxt, diet && !stale && s.genTxtGhost]}>
+                {diet ? '다시 구성' : '식단 생성'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        )}
 
         {/* 막다른 길 방지 — 다음 행동 */}
         <TouchableOpacity style={s.linkRow} onPress={() => router.push('/tabs/my')}>

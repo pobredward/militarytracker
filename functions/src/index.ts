@@ -9,10 +9,16 @@ import { onCall, HttpsError, CallableRequest } from 'firebase-functions/v2/https
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { defineSecret } from 'firebase-functions/params';
 import * as logger from 'firebase-functions/logger';
+import { requirePro } from './entitlement';
 
 const ANTHROPIC_API_KEY = defineSecret('ANTHROPIC_API_KEY');
 
 setGlobalOptions({ region: 'asia-northeast3', maxInstances: 10 });
+
+// 구독 콜러블 — users/{uid}.sub 를 바꿀 수 있는 유일한 경로
+export {
+  subStatus, subStartTrial, subRedeemPromo, subGrant, subApplyReceipt,
+} from './subscription';
 
 const MODEL = 'claude-sonnet-4-5';
 const API_URL = 'https://api.anthropic.com/v1/messages';
@@ -106,7 +112,8 @@ interface PlanReq {
 export const aiPlan = onCall(
   { secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 60, memory: '256MiB' },
   async (req: CallableRequest<PlanReq>) => {
-    requireAuth(req);
+    // 유료 기능 — 앱의 잠금 UI 를 우회해도 여기서 끊긴다
+    await requirePro(requireAuth(req), 'ai_plan');
     const p = req.data?.profile;
     const catalog = str(req.data?.catalog, 12000);
     if (!p || !catalog) throw new HttpsError('invalid-argument', '요청 정보가 부족합니다.');
@@ -153,7 +160,7 @@ interface DietReq {
 export const aiDiet = onCall(
   { secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 60, memory: '256MiB' },
   async (req: CallableRequest<DietReq>) => {
-    requireAuth(req);
+    await requirePro(requireAuth(req), 'ai_diet');
     const d = req.data;
     if (!d) throw new HttpsError('invalid-argument', '요청 정보가 부족합니다.');
 
@@ -185,7 +192,7 @@ interface CoachReq {
 export const aiCoach = onCall(
   { secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 60, memory: '256MiB' },
   async (req: CallableRequest<CoachReq>) => {
-    requireAuth(req);
+    await requirePro(requireAuth(req), 'ai_coach');
     const incoming = Array.isArray(req.data?.messages) ? req.data.messages : [];
     if (!incoming.length) throw new HttpsError('invalid-argument', '메시지가 비어 있습니다.');
 

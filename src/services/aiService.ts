@@ -24,6 +24,26 @@ export const FALLBACK_DIET: DietPlan = {
 
 export class AIUnavailable extends Error {}
 
+/**
+ * 서버가 구독을 요구했다. 화면 게이트를 우회했거나 대기 중에 구독이 끝난 경우.
+ * 조용히 로컬 폴백으로 넘기지 않고 구독 안내를 띄우기 위해 따로 구분한다.
+ */
+export class SubscriptionRequired extends Error {
+  readonly feature: string;
+  constructor(message: string, feature: string) {
+    super(message);
+    this.feature = feature;
+  }
+}
+
+function asSubRequired(e: unknown): SubscriptionRequired | null {
+  const err = e as FunctionsError;
+  if (err?.code !== 'functions/permission-denied') return null;
+  const d = err.details as { reason?: string; feature?: string } | undefined;
+  if (d?.reason !== 'subscription_required') return null;
+  return new SubscriptionRequired(err.message || '구독이 필요합니다.', d.feature ?? '');
+}
+
 function isUnavailable(e: unknown): boolean {
   const code = (e as FunctionsError)?.code ?? '';
   return (
@@ -49,6 +69,8 @@ export async function generatePlan(p: UserProfile): Promise<Plan> {
     const plan = planFromAI(res.data, p);
     if (plan) return plan;
   } catch (e) {
+    const need = asSubRequired(e);
+    if (need) throw need;
     if (!isUnavailable(e)) console.warn('[aiPlan]', e);
   }
   return buildLocalPlan(p);
@@ -74,6 +96,8 @@ export async function generateDiet(p: UserProfile, stats?: BodyStats): Promise<D
     const j = res.data as DietPlan;
     if (j?.meals?.length) return { ...j, src: 'AI', createdAt: new Date().toISOString() };
   } catch (e) {
+    const need = asSubRequired(e);
+    if (need) throw need;
     if (!isUnavailable(e)) console.warn('[aiDiet]', e);
   }
   return FALLBACK_DIET;
@@ -96,6 +120,8 @@ export async function askCoach(
     if (reply) return reply;
     throw new AIUnavailable();
   } catch (e) {
+    const need = asSubRequired(e);
+    if (need) throw need;
     if (!isUnavailable(e)) console.warn('[aiCoach]', e);
     throw new AIUnavailable('코치 연결에 실패했습니다. 잠시 후 다시 시도해주세요.');
   }
