@@ -182,7 +182,7 @@ const s = StyleSheet.create({
   heroLink: { fontSize: 11.5, color: colors.mid, fontWeight: '600' },
   heroName: { fontSize: 26, fontWeight: '800', color: colors.ink, letterSpacing: -0.5, marginBottom: 4 },
   heroFocus: { fontSize: 13, color: colors.muted, marginBottom: 14 },
-  heroThumbs: { flexGrow: 0, marginBottom: 16, marginHorizontal: -4 },
+  heroThumbs: { flexGrow: 0, flexShrink: 0, marginBottom: 16, marginHorizontal: -4 },
   heroThumbsInner: { gap: 8, paddingHorizontal: 4 },
   heroThumb: { width: 72, height: 72 },
   heroThumbTxt: { fontSize: 9.5, color: colors.muted, marginTop: 5, width: 72, textAlign: 'center' },

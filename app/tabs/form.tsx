@@ -71,22 +71,17 @@ export default function FormScreen() {
         )}
       </View>
 
-      <FlatList
-        data={FILTERS}
-        keyExtractor={(f) => String(f.key)}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={s.pillScroll}
-        contentContainerStyle={s.pillContent}
-        renderItem={({ item }) => (
+      <View style={s.pillWrap}>
+        {FILTERS.map((f) => (
           <TouchableOpacity
-            style={[s.pill, filter === item.key && s.pillActive]}
-            onPress={() => setFilter(item.key)}
+            key={String(f.key)}
+            style={[s.pill, filter === f.key && s.pillActive]}
+            onPress={() => setFilter(f.key)}
           >
-            <Text style={[s.pillTxt, filter === item.key && s.pillTxtActive]}>{item.label}</Text>
+            <Text style={[s.pillTxt, filter === f.key && s.pillTxtActive]}>{f.label}</Text>
           </TouchableOpacity>
-        )}
-      />
+        ))}
+      </View>
 
       <FlatList
         data={list}
@@ -154,8 +149,13 @@ const s = StyleSheet.create({
   clear: { position: 'absolute', right: 28, padding: 6 },
   clearTxt: { color: colors.muted, fontSize: 13 },
 
-  pillScroll: { flexGrow: 0 },
-  pillContent: { paddingHorizontal: 16, paddingBottom: 12, gap: 8 },
+  // 칩은 가로 스크롤 대신 줄바꿈으로 전부 노출한다.
+  // 스크롤바를 전역 CSS 로 숨겨 둔 웹에서는 더 넘어가는지 알 방법이 없고,
+  // ScrollView 기본값(flexShrink:1) 탓에 아래 리스트에 눌려 잘리기도 했다
+  pillWrap: {
+    flexDirection: 'row', flexWrap: 'wrap', flexShrink: 0,
+    paddingHorizontal: 16, paddingBottom: 12, gap: 8,
+  },
   pill: {
     backgroundColor: colors.panel2, borderRadius: 20,
     paddingHorizontal: 15, paddingVertical: 8,

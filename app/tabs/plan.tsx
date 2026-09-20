@@ -10,7 +10,8 @@ import { useAuthStore } from '../../src/stores/authStore';
 import { exById, EQUIP_LABEL, PART_LABEL } from '../../src/data/exercises';
 import { routineById } from '../../src/data/routines';
 import { savePlan } from '../../src/services/authService';
-import { generatePlan } from '../../src/services/aiService';
+import { generatePlan, SubscriptionRequired } from '../../src/services/aiService';
+import { useEntitlement } from '../../src/hooks/useEntitlement';
 import { buildLocalPlan } from '../../src/utils/planner';
 import ExerciseMedia from '../../src/components/ExerciseMedia';
 import { PrimaryBtn, GhostBtn, Notice } from '../../src/components/ui';
@@ -23,6 +24,9 @@ export default function PlanScreen() {
   const { plan, profile, startSession, setPlan } = useAppStore();
   const [activeDay, setActiveDay] = useState(0);
   const [busy, setBusy] = useState<'ai' | 'local' | null>(null);
+  // '자동 재구성'(결정형 알고리즘)은 무료다 — 구독 없이도 플랜을 새로 짤 수 있어야 한다
+  const { can } = useEntitlement();
+  const canAI = can('ai_plan');
 
   // 다른 화면에서 루틴을 바꾸면 선택된 데이가 범위를 벗어날 수 있다
   useEffect(() => {
@@ -32,6 +36,10 @@ export default function PlanScreen() {
   async function regenerate(mode: 'ai' | 'local') {
     if (!profile || !user) {
       showAlert('알림', '신체 정보가 없습니다. MY 탭에서 온보딩 정보를 확인해주세요.');
+      return;
+    }
+    if (mode === 'ai' && !canAI) {
+      router.push('/subscribe?f=ai_plan');
       return;
     }
     setBusy(mode);
@@ -44,8 +52,9 @@ export default function PlanScreen() {
       if (mode === 'ai' && next.planSrc !== 'AI') {
         showAlert('자동 구성으로 대체', 'AI 서버에 연결하지 못해 자동 알고리즘으로 구성했습니다.');
       }
-    } catch {
-      showAlert('오류', '플랜 재생성에 실패했습니다.');
+    } catch (e) {
+      if (e instanceof SubscriptionRequired) router.push('/subscribe?f=ai_plan');
+      else showAlert('오류', '플랜 재생성에 실패했습니다.');
     } finally {
       setBusy(null);
     }
@@ -142,7 +151,7 @@ export default function PlanScreen() {
 
         <View style={s.regenRow}>
           <GhostBtn
-            label="AI로 다시 구성"
+            label={canAI ? 'AI로 다시 구성' : 'AI로 다시 구성 · PRO'}
             onPress={() => regenerate('ai')}
             loading={busy === 'ai'}
             disabled={busy !== null}
@@ -188,7 +197,8 @@ const s = StyleSheet.create({
   routineSub: { fontSize: 11, color: colors.muted, marginTop: 3 },
   routineLink: { fontSize: 11.5, color: colors.mid, fontWeight: '600' },
 
-  pillScroll: { flexGrow: 0 },
+  // 가로 스크롤러: ScrollView 기본값이 flexShrink:1 이라 형제에 눌려 잘린다
+  pillScroll: { flexGrow: 0, flexShrink: 0 },
   pillContent: { paddingHorizontal: 16, paddingBottom: 14, gap: 8, flexDirection: 'row' },
   pill: {
     backgroundColor: colors.panel2, borderRadius: 14,

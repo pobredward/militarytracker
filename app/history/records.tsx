@@ -68,15 +68,10 @@ export default function RecordsScreen() {
     <Screen>
       <TopBar title="개인 기록" meta={`${rows.length}종목`} onBack={() => router.back()} />
 
-      <FlatList
-        data={['전체' as const, ...parts]}
-        keyExtractor={(p) => String(p)}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={s.pillScroll}
-        contentContainerStyle={s.pillContent}
-        renderItem={({ item }) => (
+      <View style={s.pillWrap}>
+        {(['전체' as const, ...parts]).map((item) => (
           <TouchableOpacity
+            key={String(item)}
             style={[s.pill, part === item && s.pillOn]}
             onPress={() => setPart(item)}
           >
@@ -84,8 +79,8 @@ export default function RecordsScreen() {
               {item === '전체' ? '전체' : PART_LABEL[item]}
             </Text>
           </TouchableOpacity>
-        )}
-      />
+        ))}
+      </View>
 
       <FlatList
         data={filtered}
@@ -123,8 +118,13 @@ export default function RecordsScreen() {
 }
 
 const s = StyleSheet.create({
-  pillScroll: { flexGrow: 0 },
-  pillContent: { paddingHorizontal: 16, paddingBottom: 12, gap: 8 },
+  // 칩은 가로 스크롤 대신 줄바꿈으로 전부 노출한다.
+  // 스크롤바를 전역 CSS 로 숨겨 둔 웹에서는 더 넘어가는지 알 방법이 없고,
+  // ScrollView 기본값(flexShrink:1) 탓에 아래 리스트에 눌려 잘리기도 했다
+  pillWrap: {
+    flexDirection: 'row', flexWrap: 'wrap', flexShrink: 0,
+    paddingHorizontal: 16, paddingBottom: 12, gap: 8,
+  },
   pill: {
     backgroundColor: colors.panel2, borderRadius: 20,
     paddingHorizontal: 15, paddingVertical: 8,

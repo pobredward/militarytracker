@@ -11,7 +11,11 @@ import { useAuthStore } from '../../src/stores/authStore';
 import { PART_LABEL, PART_ORDER, exById } from '../../src/data/exercises';
 import { saveWeight } from '../../src/services/workoutService';
 import { logout, deleteAccount, saveProfile } from '../../src/services/authService';
-import { askCoach, AIUnavailable } from '../../src/services/aiService';
+import { askCoach, AIUnavailable, SubscriptionRequired } from '../../src/services/aiService';
+import { useEntitlement } from '../../src/hooks/useEntitlement';
+import { ProLock, ProBadge } from '../../src/components/ProLock';
+import { SUB_STATUS_LABEL } from '../../src/utils/subscription';
+import { PRO_NAME } from '../../src/config/entitlements';
 import { calcBodyStats, effectiveWeight, GOAL_LABEL } from '../../src/utils/body';
 import { setsByPart, weakestPart, totalSets, totalVolume, currentStreakDays, fmtDuration, fmtVolume } from '../../src/utils/stats';
 
@@ -22,6 +26,8 @@ export default function MyScreen() {
     profile, plan, logs, weights, chat, chatBusy,
     addChat, setChatBusy, addWeight, resetAll, setProfile,
   } = useAppStore();
+  const { can, pro, sub, left } = useEntitlement();
+  const canCoach = can('ai_coach');
   const [weightInput, setWeightInput] = useState('');
   const [chatInput, setChatInput] = useState('');
   const scrollRef = useRef<ScrollView>(null);
@@ -87,6 +93,10 @@ export default function MyScreen() {
 
   async function handleChat() {
     if (!chatInput.trim() || chatBusy) return;
+    if (!canCoach) {
+      router.push('/subscribe?f=ai_coach');
+      return;
+    }
     const text = chatInput.trim();
     setChatInput('');
     addChat({ role: 'user', content: text });
@@ -95,6 +105,10 @@ export default function MyScreen() {
       const reply = await askCoach([...chat, { role: 'user', content: text }], coachContext());
       addChat({ role: 'assistant', content: reply });
     } catch (e) {
+      if (e instanceof SubscriptionRequired) {
+        router.push('/subscribe?f=ai_coach');
+        return;
+      }
       addChat({
         role: 'assistant',
         content: e instanceof AIUnavailable
@@ -256,8 +270,31 @@ export default function MyScreen() {
           </View>
         </View>
 
+        {/* 구독 */}
+        <Text style={s.sectionLabel}>구독</Text>
+        <TouchableOpacity style={s.subRow} activeOpacity={0.8} onPress={() => router.push('/subscribe')}>
+          <View style={{ flex: 1 }}>
+            <View style={s.subHead}>
+              <Text style={s.subTitle}>{pro ? PRO_NAME : '무료 플랜'}</Text>
+              {pro && <ProBadge />}
+            </View>
+            <Text style={s.subSub}>
+              {pro
+                ? `${SUB_STATUS_LABEL[sub.status]}${left !== null ? ` · ${left}일 남음` : ''}`
+                : 'AI 개인화 · 식단 · 루틴 추천은 구독 기능입니다'}
+            </Text>
+          </View>
+          <Text style={s.subChev}>›</Text>
+        </TouchableOpacity>
+
         {/* AI Coach */}
-        <Text style={s.sectionLabel}>AI 코치</Text>
+        <View style={s.sectionRowInline}>
+          <Text style={s.sectionLabel}>AI 코치</Text>
+          {!canCoach && <ProBadge style={{ marginBottom: 10 }} />}
+        </View>
+        {!canCoach ? (
+          <ProLock feature="ai_coach" />
+        ) : (
         <View style={s.card}>
           <View style={s.chatBox}>
             {chat.length === 0 && (
@@ -291,6 +328,7 @@ export default function MyScreen() {
             </TouchableOpacity>
           </View>
         </View>
+        )}
 
         <Text style={s.notice}>통증·부상·질환 관련 판단은 의료 전문가와 상의하세요.</Text>
 
@@ -362,7 +400,7 @@ const s = StyleSheet.create({
   weakPart: { color: colors.ink, fontWeight: '700' },
   subMeta: { fontSize: 11, color: colors.muted, marginTop: 10 },
 
-  weightHistory: { marginBottom: 14 },
+  weightHistory: { flexGrow: 0, flexShrink: 0, marginBottom: 14 },
   weightChip: {
     backgroundColor: colors.panel2, borderRadius: 12,
     paddingHorizontal: 12, paddingVertical: 10,
@@ -396,6 +434,17 @@ const s = StyleSheet.create({
     paddingHorizontal: 18, paddingVertical: 11, alignItems: 'center',
   },
   weightBtnTxt: { color: colors.bg, fontSize: 13, fontWeight: '700' },
+
+  sectionRowInline: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  subRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: colors.panel, borderRadius: 16, padding: 16,
+    borderWidth: 1, borderColor: colors.line, marginBottom: 12,
+  },
+  subHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  subTitle: { fontSize: 14, fontWeight: '700', color: colors.ink },
+  subSub: { fontSize: 11.5, color: colors.muted, marginTop: 4, lineHeight: 18 },
+  subChev: { fontSize: 20, color: colors.muted },
 
   chatBox: { gap: 10, marginBottom: 12 },
   msgU: {

@@ -404,7 +404,8 @@ const s = StyleSheet.create({
   lastSets: { color: colors.ink, fontWeight: '700' },
   lastEmpty: { fontSize: 12, color: colors.muted, textAlign: 'center' },
 
-  filmScroll: { flexGrow: 0 },
+  // 가로 스크롤러: ScrollView 기본값이 flexShrink:1 이라 형제에 눌려 잘린다
+  filmScroll: { flexGrow: 0, flexShrink: 0 },
   filmContent: { paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
   filmCell: {
     width: 80, borderRadius: 12, padding: 10,
