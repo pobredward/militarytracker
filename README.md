@@ -59,19 +59,29 @@ functions/              Cloud Functions (AI 프록시)
 
 ### 미디어 추가 방법
 
-1. 파일을 규칙에 맞게 저장
-   - 영상: `assets/exercise/video/{id}.mp4` — **3~5초 루프, 무음, 1:1 비율**
-   - 썸네일: `assets/exercise/image/{id}.png` — 1:1, 512px 이하
-2. `src/data/media.ts` 의 `EX_VIDEO` / `EX_IMAGE` 에 한 줄 추가
-   ```ts
-   bench: require('../../assets/exercise/video/bench.mp4'),
+영상은 앱에 넣지 않는다. **서울 버킷(`gs://military-tracker-96bdd`, asia-northeast3)** 에 올리고
+앱이 실행할 때 버킷의 매니페스트를 읽어 받는다. 영상을 추가·교체해도 **앱 업데이트가 필요 없다.**
+
+1. 원본을 `media/originals/<부위>/` 에 넣는다 — git 에 들어가지 않는다
+   - 부위: `chest back legs shoulders biceps triceps abs`
+   - 파일명 앞 번호 = `exercises.ts` 에서 그 부위의 순번 (`21.Svend Press.mp4` → 가슴 21번째 = `svend`)
+2. 매칭표 확인
+   ```bash
+   npm run media:upload -- back --dry
    ```
-   (React Native 의 `require()` 는 정적 경로만 허용하므로 자동 스캔이 불가능하다)
-3. 진행 상황 확인
+3. 인코딩·업로드
+   ```bash
+   npm run media:upload -- back
+   ```
+   1080×1080 H.264 (CRF 23) + 512px 썸네일을 올리고 매니페스트를 갱신한다.
+   `src/data/mediaManifest.json` 이 바뀌므로 **커밋할 것** (첫 실행·오프라인용 스냅샷).
+4. 진행 상황
    ```bash
    npm run media:report            # 부위별 등록 현황
    npm run media:report --missing  # 누락 id 목록
    ```
+
+자세한 구조와 이유는 `media/README.md`.
 
 미등록 종목은 `<ExerciseMedia />` 가 부위 색상 플레이스홀더를 자동으로 렌더한다.
 

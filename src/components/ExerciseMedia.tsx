@@ -1,14 +1,17 @@
-import { useEffect } from 'react';
-import { View, Text, Image, StyleSheet, StyleProp, ViewStyle } from 'react-native';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { useEffect, useState } from 'react';
+import {
+  View, Text, Image, StyleSheet, StyleProp, ViewStyle, ImageSourcePropType,
+} from 'react-native';
+import { useVideoPlayer, VideoView, VideoSource } from 'expo-video';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors, partTint } from '../utils/colors';
 import { exById, PART_LABEL } from '../data/exercises';
-import { getImage, getVideo } from '../data/media';
+import { videoSource, posterSource } from '../data/media';
+import { useMediaEntry } from '../stores/mediaStore';
 
 interface Props {
   exId: string;
-  /** 3~5초 클립 자동 재생 — 상세 화면에서만 사용한다 */
+  /** 루프 영상 자동 재생 — 상세·세션 화면에서만 사용한다 */
   autoPlay?: boolean;
   rounded?: number;
   style?: StyleProp<ViewStyle>;
@@ -19,27 +22,37 @@ interface Props {
 }
 
 /**
- * 영상 → 포스터 → 플레이스홀더 순으로 폴백.
+ * 영상 → 썸네일 → 플레이스홀더 순으로 폴백.
  *
  * 중요: 비디오 플레이어를 만드는 것은 별도 컴포넌트로 분리했다.
  * hooks 는 조건부 호출이 불가능하므로, 목록/그리드(autoPlay=false)에서
  * 같은 컴포넌트를 쓰면 종목 수만큼 네이티브 플레이어가 생성된다.
  */
 export default function ExerciseMedia(props: Props) {
-  const videoSrc = props.autoPlay ? getVideo(props.exId) ?? null : null;
-  return videoSrc ? (
-    <VideoMedia {...props} src={videoSrc} />
+  const entry = useMediaEntry(props.exId);
+  const poster = posterSource(props.exId, entry);
+  const src = props.autoPlay && entry?.video ? videoSource(props.exId, entry.video) : null;
+
+  // key: 종목이 바뀌면 플레이어를 새로 만든다. iOS 의 player.replace() 는
+  // 메인 스레드에서 동기로 로드해 화면이 멈출 수 있다.
+  return src ? (
+    <VideoMedia key={`${props.exId}@${entry?.video}`} {...props} src={src} poster={poster} />
   ) : (
-    <StaticMedia {...props} />
+    <StaticMedia {...props} poster={poster} />
   );
 }
 
-function VideoMedia({ src, rounded = 16, style, badge, badgeColor, showLabel, dim = 0.35, exId }: Props & { src: number }) {
+function VideoMedia({
+  src, poster, rounded = 16, style, badge, badgeColor, showLabel, dim = 0.35, exId,
+}: Props & { src: VideoSource; poster: ImageSourcePropType | null }) {
   const ex = exById(exId);
+  // 첫 프레임이 그려질 때까지 썸네일로 덮어 둔다 — 영상을 받는 동안 검은 화면 방지.
+  // 오프라인이라 영상을 못 받으면 썸네일이 그대로 남는다.
+  const [ready, setReady] = useState(false);
+
   const player = useVideoPlayer(src, (p) => {
     p.loop = true;
     p.muted = true;
-    p.currentTime = 0;
     p.play();
   });
 
@@ -53,16 +66,25 @@ function VideoMedia({ src, rounded = 16, style, badge, badgeColor, showLabel, di
 
   return (
     <View style={[s.wrap, { borderRadius: rounded }, style]}>
-      <VideoView player={player} style={s.fill} contentFit="cover" nativeControls={false} />
+      <VideoView
+        player={player}
+        style={s.fill}
+        contentFit="cover"
+        nativeControls={false}
+        onFirstFrameRender={() => setReady(true)}
+      />
+      {!ready && poster && <Image source={poster} style={s.fill} resizeMode="cover" />}
       {dim > 0 && <View style={[s.fill, { backgroundColor: `rgba(0,0,0,${dim})` }]} pointerEvents="none" />}
       <Overlay ex={ex} badge={badge} badgeColor={badgeColor} showLabel={showLabel} />
     </View>
   );
 }
 
-function StaticMedia({ exId, rounded = 16, style, badge, badgeColor, showLabel, dim = 0.35 }: Props) {
+function StaticMedia({
+  exId, poster, rounded = 16, style, badge, badgeColor, showLabel, dim = 0.35,
+}: Props & { poster: ImageSourcePropType | null }) {
   const ex = exById(exId);
-  const imageSrc = getImage(exId) ?? null;
+  const imageSrc = poster;
   const tint = ex ? partTint[ex.part] ?? colors.panel3 : colors.panel3;
 
   return (

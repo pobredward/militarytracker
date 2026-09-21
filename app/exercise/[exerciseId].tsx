@@ -5,7 +5,7 @@ import { Screen, TopBar, Body, SectionLabel, EmptyState, Notice } from '../../sr
 import ExerciseMedia from '../../src/components/ExerciseMedia';
 import { exById, exByPart, EQUIP_LABEL, LEVEL_LABEL, PART_LABEL, PPL_LABEL } from '../../src/data/exercises';
 import { formByExId } from '../../src/data/formCheck';
-import { hasVideo } from '../../src/data/media';
+import { useMediaEntry } from '../../src/stores/mediaStore';
 import { rirFor, RISK_NOTE, ROM_NOTE } from '../../src/data/coaching';
 import { useAppStore } from '../../src/stores/appStore';
 import { lastRecordOf, personalBest, e1rm } from '../../src/utils/stats';
@@ -14,6 +14,7 @@ export default function ExerciseDetailScreen() {
   const { exerciseId } = useLocalSearchParams<{ exerciseId: string }>();
   const router = useRouter();
   const { logs } = useAppStore();
+  const hasVideo = !!useMediaEntry(String(exerciseId))?.video;
 
   const e = exById(String(exerciseId));
   if (!e) {
@@ -41,7 +42,7 @@ export default function ExerciseDetailScreen() {
           autoPlay
           rounded={0}
           dim={0.2}
-          badge={hasVideo(e.id) ? '▶ LOOP' : undefined}
+          badge={hasVideo ? '▶ LOOP' : undefined}
           style={s.hero}
         />
 

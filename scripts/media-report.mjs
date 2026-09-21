@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 운동 미디어(3~5초 클립 / 썸네일) 등록 현황 리포트
+ * 운동 미디어(루프 클립 / 썸네일) 등록 현황 리포트 — src/data/mediaManifest.json 기준
  *   node scripts/media-report.mjs
  *   node scripts/media-report.mjs --missing   (누락 id 만 출력)
  */
@@ -12,6 +12,9 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const exSrc = readFileSync(join(root, 'src/data/exercises.ts'), 'utf8');
 const mediaSrc = readFileSync(join(root, 'src/data/media.ts'), 'utf8');
+// 영상은 버킷에 있고, 무엇이 올라가 있는지는 매니페스트 스냅샷이 안다
+const manifest = JSON.parse(readFileSync(join(root, 'src/data/mediaManifest.json'), 'utf8'));
+const items = Object.entries(manifest.items ?? {});
 
 const exercises = [...exSrc.matchAll(/\{\s*id:\s*'([^']+)'\s*,\s*n:\s*'([^']+)'\s*,\s*part:\s*'([^']+)'/g)]
   .map(([, id, n, part]) => ({ id, n, part }));
@@ -22,8 +25,9 @@ function registered(block) {
   return new Set([...m[1].matchAll(/^\s*([A-Za-z0-9_]+)\s*:/gm)].map(([, k]) => k));
 }
 
-const videos = registered('VIDEO');
-const images = registered('IMAGE');
+const videos = new Set(items.filter(([, e]) => e.video).map(([id]) => id));
+// 썸네일: 앱에 번들된 것 + 버킷에 올라간 것
+const images = new Set([...registered('IMAGE'), ...items.filter(([, e]) => e.poster).map(([id]) => id)]);
 
 const missing = exercises.filter((e) => !videos.has(e.id) && !images.has(e.id));
 const onlyImage = exercises.filter((e) => !videos.has(e.id) && images.has(e.id));
@@ -51,7 +55,7 @@ Object.entries(byPart).forEach(([part, v]) => {
 
 console.log(`\n  영상 없음(이미지만): ${onlyImage.length}개`);
 console.log(`  미디어 전무: ${missing.length}개`);
-console.log('\n  파일 규칙');
-console.log('    영상   assets/exercise/video/{id}.mp4   (3~5초, 무음, 1:1)');
-console.log('    썸네일 assets/exercise/image/{id}.png   (1:1, 512px 이하)');
-console.log('    등록   src/data/media.ts 의 EX_VIDEO / EX_IMAGE 에 한 줄 추가\n');
+console.log('\n  영상 추가');
+console.log('    1) 원본을 media/originals/<부위>/ 에 넣는다 (파일명 앞 번호 = 부위 내 순번)');
+console.log('    2) npm run media:upload -- <부위> --dry   매칭표 확인');
+console.log('    3) npm run media:upload -- <부위>         인코딩·업로드 (앱 업데이트 불필요)\n');

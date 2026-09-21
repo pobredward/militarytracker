@@ -57,3 +57,9 @@ firestore-debug.log
 
 # Firebase Hosting 배포 캐시
 .firebase/
+
+# 영상 인코딩 작업 폴더 (scripts/upload-videos.mjs)
+.cache/
+
+# 운동 영상 원본 — 부위당 100~200MB, 절대 커밋하지 않는다 (media/README.md)
+media/originals/

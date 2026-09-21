@@ -1,0 +1,23 @@
+rules_version = '2';
+
+// MilitaryTracker — Cloud Storage 보안 규칙 (서울 버킷 military-tracker-96bdd)
+//
+// exercise/ 아래는 운동 시범 영상·썸네일·매니페스트다. 원래 앱 번들에 그대로
+// 들어가던 공개 콘텐츠라 누구나 읽을 수 있게 둔다. 영상 플레이어(특히 웹의
+// <video>)는 Firebase 인증 헤더를 붙일 수 없어서 로그인 조건을 걸 수 없다.
+//
+// 쓰기는 규칙상 전면 차단한다. 업로드는 scripts/upload-videos.mjs 가
+// Google Cloud 권한(Admin)으로 하므로 이 규칙을 거치지 않는다.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /exercise/{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 그 외 경로는 아무도 접근할 수 없다
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,57 +1,67 @@
 /**
- * 운동 미디어 레지스트리
+ * 운동 미디어
  * ───────────────────────────────────────────────────────────────────────────
- * React Native 의 require() 는 정적 경로만 허용하므로, 파일이 준비될 때마다
- * 아래 맵에 한 줄씩 추가하는 방식으로 관리한다. (동적 require 불가)
+ * 영상은 앱에 넣지 않고 서울 버킷(asia-northeast3)에서 받아 기기에 캐시한다.
+ * 무엇이 올라가 있는지는 버킷의 exercise/manifest.json 이 알려 주므로,
+ * 영상을 추가·교체해도 앱 업데이트가 필요 없다 (src/stores/mediaStore.ts).
  *
- * 파일 규칙
- *   영상    assets/exercise/video/{exerciseId}.mp4   — 720x720, CRF 30, 무음, 3~8초 루프
- *   포스터  assets/exercise/image/{exerciseId}.jpg   — 512x512 JPEG (영상 첫 프레임)
+ * 버킷 구조
+ *   exercise/video/{id}.mp4    1080x1080 H.264, 무음, 루프용
+ *   exercise/poster/{id}.jpg   512x512 첫 프레임
+ *   exercise/manifest.json     { items: { [id]: { video, poster } } } — 값은 GCS generation
  *
- * 인코딩 명령 (원본 -> 배포본)
- *   ffmpeg -i src.mp4 -vf scale=720:720:flags=lanczos -c:v libx264 -profile:v main \
- *          -crf 30 -preset slow -pix_fmt yuv420p -an -movflags +faststart -g 24 {id}.mp4
- *   ffmpeg -ss 0.5 -i src.mp4 -vframes 1 -vf scale=512:512 -q:v 4 {id}.jpg
+ * 업로드: node scripts/upload-videos.mjs <원본폴더> <부위>
  *
- * 목록/그리드는 포스터(EX_IMAGE), 상세 화면은 영상(EX_VIDEO)을 사용한다.
- * 누락 목록은 `npm run media:report` 로 확인.
+ * URL 의 v= 에 generation 을 넣는다. 같은 이름으로 다시 올리면 generation 이
+ * 바뀌어 URL 이 달라지므로 기기 캐시·브라우저 캐시가 자동으로 새 파일을 받는다.
+ * 그래서 객체에는 Cache-Control: immutable 을 걸어 두었다.
  */
+import type { ImageSourcePropType } from 'react-native';
+import type { VideoSource } from 'expo-video';
 
-export const EX_VIDEO: Record<string, number> = {
-  // 가슴 30종 — 전량 등록 완료
-  pushup: require('../../assets/exercise/video/pushup.mp4'),
-  widepushup: require('../../assets/exercise/video/widepushup.mp4'),
-  diamondpushup: require('../../assets/exercise/video/diamondpushup.mp4'),
-  declinepushup: require('../../assets/exercise/video/declinepushup.mp4'),
-  inclinepushup: require('../../assets/exercise/video/inclinepushup.mp4'),
-  bench: require('../../assets/exercise/video/bench.mp4'),
-  inclinebench: require('../../assets/exercise/video/inclinebench.mp4'),
-  declinebench: require('../../assets/exercise/video/declinebench.mp4'),
-  dbbench: require('../../assets/exercise/video/dbbench.mp4'),
-  incdbpress: require('../../assets/exercise/video/incdbpress.mp4'),
-  decdbpress: require('../../assets/exercise/video/decdbpress.mp4'),
-  dbfly: require('../../assets/exercise/video/dbfly.mp4'),
-  incdbfly: require('../../assets/exercise/video/incdbfly.mp4'),
-  crossover: require('../../assets/exercise/video/crossover.mp4'),
-  lowcablefly: require('../../assets/exercise/video/lowcablefly.mp4'),
-  highcablefly: require('../../assets/exercise/video/highcablefly.mp4'),
-  pecdeck: require('../../assets/exercise/video/pecdeck.mp4'),
-  chestpressmc: require('../../assets/exercise/video/chestpressmc.mp4'),
-  dipschest: require('../../assets/exercise/video/dipschest.mp4'),
-  smithbench: require('../../assets/exercise/video/smithbench.mp4'),
-  svend: require('../../assets/exercise/video/svend.mp4'),
-  floorpress: require('../../assets/exercise/video/floorpress.mp4'),
-  pikepushup: require('../../assets/exercise/video/pikepushup.mp4'),
-  archerpushup: require('../../assets/exercise/video/archerpushup.mp4'),
-  plyopushup: require('../../assets/exercise/video/plyopushup.mp4'),
-  spiderpushup: require('../../assets/exercise/video/spiderpushup.mp4'),
-  hindupushup: require('../../assets/exercise/video/hindupushup.mp4'),
-  revbench: require('../../assets/exercise/video/revbench.mp4'),
-  squeezepress: require('../../assets/exercise/video/squeezepress.mp4'),
-  guillotine: require('../../assets/exercise/video/guillotine.mp4'),
-  // 등 · 하체 · 어깨 · 팔 · 복근 — 준비되는 대로 추가
-};
+export const MEDIA_BUCKET = 'military-tracker-96bdd';
+const BASE = `https://firebasestorage.googleapis.com/v0/b/${MEDIA_BUCKET}/o`;
 
+const objectUrl = (path: string, rev?: string): string =>
+  `${BASE}/${encodeURIComponent(path)}?alt=media${rev ? `&v=${rev}` : ''}`;
+
+export const MANIFEST_URL = objectUrl('exercise/manifest.json');
+export const videoUrl = (id: string, rev: string) => objectUrl(`exercise/video/${id}.mp4`, rev);
+export const posterUrl = (id: string, rev: string) => objectUrl(`exercise/poster/${id}.jpg`, rev);
+
+/** 매니페스트 한 항목 — 값은 GCS generation (없으면 해당 미디어 없음) */
+export interface MediaEntry {
+  video?: string;
+  poster?: string;
+}
+
+// 같은 소스 객체를 돌려줘야 useVideoPlayer 가 렌더마다 플레이어를 다시 만들지 않는다
+const sourceCache = new Map<string, VideoSource>();
+
+export function videoSource(id: string, rev: string): VideoSource {
+  const key = `${id}@${rev}`;
+  let src = sourceCache.get(key);
+  if (!src) {
+    // useCaching: iOS·Android 에서 한 번 받은 영상을 기기에 저장해 두고 재사용한다.
+    // 웹은 브라우저 캐시가 같은 일을 한다.
+    src = { uri: videoUrl(id, rev), useCaching: true };
+    sourceCache.set(key, src);
+  }
+  return src;
+}
+
+/** 번들 썸네일이 있으면 그걸(즉시 표시), 없으면 버킷 썸네일 */
+export function posterSource(id: string, entry?: MediaEntry): ImageSourcePropType | null {
+  const local = EX_IMAGE[id];
+  if (local) return local;
+  if (entry?.poster) return { uri: posterUrl(id, entry.poster) };
+  return null;
+}
+
+/**
+ * 앱에 함께 들어가는 썸네일 — 자세 탭 그리드가 네트워크 없이 즉시 뜨도록.
+ * 새 종목은 여기 추가하지 않아도 버킷 썸네일(exercise/poster)로 표시된다.
+ */
 export const EX_IMAGE: Record<string, number> = {
   // 가슴 30종 포스터 (영상 첫 프레임)
   pushup: require('../../assets/exercise/image/pushup.jpg'),
@@ -97,10 +107,3 @@ export const EX_IMAGE: Record<string, number> = {
   backsquat: require('../../assets/form/form_squat.png'),
   uprow: require('../../assets/form/form_uprow.png'),
 };
-
-export const hasVideo = (id: string): boolean => id in EX_VIDEO;
-export const getVideo = (id: string): number | undefined => EX_VIDEO[id];
-export const getImage = (id: string): number | undefined => EX_IMAGE[id];
-
-export const VIDEO_COUNT = Object.keys(EX_VIDEO).length;
-

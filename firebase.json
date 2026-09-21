@@ -3,6 +3,12 @@
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
+  "storage": [
+    {
+      "bucket": "military-tracker-96bdd",
+      "rules": "storage.rules"
+    }
+  ],
   "functions": [
     {
       "source": "functions",

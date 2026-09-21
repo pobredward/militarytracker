@@ -8,6 +8,7 @@ import { getWorkoutLogs, getWeights, saveWorkoutLog } from '../src/services/work
 import { refreshSub } from '../src/services/billingService';
 import { useAuthStore } from '../src/stores/authStore';
 import { useAppStore } from '../src/stores/appStore';
+import { useMediaStore } from '../src/stores/mediaStore';
 import MobileFrame from '../src/components/MobileFrame';
 
 // 하이드레이션이 끝날 때까지 스플래시를 잡아둔다 (로그인 화면 깜빡임 방지)
@@ -18,6 +19,11 @@ export default function RootLayout() {
   const { setOwner, setProfile, setPlan, setLogs, setWeights, resetAll, addLog, dropPending } = useAppStore();
   const router = useRouter();
   const segments = useSegments();
+
+  // ─── 운동 영상 매니페스트 — 로그인과 무관하게 매 실행 갱신 ───────────────
+  useEffect(() => {
+    useMediaStore.getState().refresh();
+  }, []);
 
   // ─── 인증 + 사용자 데이터 복원 ──────────────────────────────────────────
   useEffect(() => {
