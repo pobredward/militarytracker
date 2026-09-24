@@ -12,7 +12,8 @@ import { onCall, HttpsError, CallableRequest } from 'firebase-functions/v2/https
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { defineSecret } from 'firebase-functions/params';
 import * as logger from 'firebase-functions/logger';
-import { requirePro } from './entitlement';
+import { requirePro, loadAccount } from './entitlement';
+import { checkCoachQuota, recordCoachUse } from './quota';
 
 const ANTHROPIC_API_KEY = defineSecret('ANTHROPIC_API_KEY');
 
@@ -23,7 +24,12 @@ export {
   subStatus, subStartTrial, subRedeemPromo, subGrant, subApplyReceipt,
 } from './subscription';
 
-const MODEL = 'claude-sonnet-4-5';
+// 기능마다 성격이 달라 모델을 나눈다.
+//  플랜·식단: 한 번에 유효한 JSON 을 만들어야 해서 정확도가 중요하고 호출이 드물다.
+//  코치:      짧은 대화라 호출이 압도적으로 많다 — 여기가 원가의 대부분이다.
+//             Haiku 로 내리면 호출당 원가가 절반 이하가 된다.
+const MODEL_PLANNING = 'claude-sonnet-4-5';
+const MODEL_CHAT = 'claude-haiku-4-5-20251001';
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const API_VERSION = '2023-06-01';
 
@@ -37,6 +43,7 @@ async function callAnthropic(opts: {
   messages: AnthropicMessage[];
   maxTokens: number;
   apiKey: string;
+  model: string;
 }): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 55_000);
@@ -50,7 +57,7 @@ async function callAnthropic(opts: {
         'anthropic-version': API_VERSION,
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: opts.model,
         max_tokens: opts.maxTokens,
         system: opts.system,
         messages: opts.messages,
@@ -146,6 +153,7 @@ export const aiPlan = onCall(
       system: '너는 근거 기반 운동 프로그램 설계 AI다. 반드시 유효한 JSON 객체만 출력한다. 마크다운, 백틱, 설명 텍스트 금지.',
       messages: [{ role: 'user', content: prompt }],
       maxTokens: 1500,
+      model: MODEL_PLANNING,
       apiKey: ANTHROPIC_API_KEY.value(),
     });
 
@@ -179,6 +187,7 @@ export const aiDiet = onCall(
       system: '너는 스포츠 영양 가이드 AI다. 반드시 유효한 JSON만 출력한다. 마크다운 금지. 의학적 진단이나 치료 조언은 하지 않는다.',
       messages: [{ role: 'user', content: prompt }],
       maxTokens: 1000,
+      model: MODEL_PLANNING,
       apiKey: ANTHROPIC_API_KEY.value(),
     });
 
@@ -195,7 +204,10 @@ interface CoachReq {
 export const aiCoach = onCall(
   { secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 60, memory: '256MiB' },
   async (req: CallableRequest<CoachReq>) => {
-    await requirePro(requireAuth(req), 'ai_coach');
+    const uid = requireAuth(req);
+    await requirePro(uid, 'ai_coach');
+    // 한도 확인을 먼저 — AI 를 부르고 나서 막으면 원가만 나간다
+    const quota = await checkCoachQuota(uid, (await loadAccount(uid)).isAdmin);
     const incoming = Array.isArray(req.data?.messages) ? req.data.messages : [];
     if (!incoming.length) throw new HttpsError('invalid-argument', '메시지가 비어 있습니다.');
 
@@ -210,7 +222,12 @@ export const aiCoach = onCall(
     const system = [
       "너는 피트니스 앱 'MILITARYTRACKER'의 AI 코치다. 짧고, 데이터 기반, 단정적이되 과장 없음. AI 필러 문구 금지.",
       str(req.data?.context, 4000),
-      '규칙: 1) 3~5문장 이내 2) 의학 진단 금지, 통증 시 전문가 상담 안내 3) 한국어.',
+      // Haiku 는 Sonnet 보다 지시를 덜 촘촘하게 따르므로 규칙을 더 명시적으로 쓴다
+      '규칙:',
+      '1) 3~5문장 이내. 길어지면 잘라서 핵심만.',
+      '2) 목록·머리말·인사말 금지. 바로 답부터.',
+      '3) 의학 진단 금지. 통증을 말하면 전문가 상담을 안내한다.',
+      '4) 한국어. 위 데이터에 있는 수치만 인용하고 없는 기록을 지어내지 않는다.',
     ].join('\n');
 
     const reply = await callAnthropic({
@@ -218,8 +235,10 @@ export const aiCoach = onCall(
       messages,
       maxTokens: 800,
       apiKey: ANTHROPIC_API_KEY.value(),
+      model: MODEL_CHAT,
     });
 
-    return { reply };
+    // 응답이 온 뒤에만 차감한다
+    return { reply, quota: await recordCoachUse(uid, quota) };
   }
 );

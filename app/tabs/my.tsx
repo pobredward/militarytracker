@@ -11,7 +11,9 @@ import { useAuthStore } from '../../src/stores/authStore';
 import { PART_LABEL, PART_ORDER, exById } from '../../src/data/exercises';
 import { saveWeight } from '../../src/services/workoutService';
 import { logout, deleteAccount, saveProfile } from '../../src/services/authService';
-import { askCoach, AIUnavailable, SubscriptionRequired } from '../../src/services/aiService';
+import {
+  askCoach, AIUnavailable, SubscriptionRequired, CoachQuotaExceeded, CoachQuota,
+} from '../../src/services/aiService';
 import { useEntitlement } from '../../src/hooks/useEntitlement';
 import { ProLock, ProBadge } from '../../src/components/ProLock';
 import { SUB_STATUS_LABEL } from '../../src/utils/subscription';
@@ -30,6 +32,9 @@ export default function MyScreen() {
   const canCoach = can('ai_coach');
   const [weightInput, setWeightInput] = useState('');
   const [chatInput, setChatInput] = useState('');
+  // 남은 코치 대화 횟수 — 서버가 응답에 실어 준다. 실제 차단도 서버가 한다.
+  const [quota, setQuota] = useState<CoachQuota | null>(null);
+  const coachEmpty = !!quota && !quota.unlimited && quota.remaining <= 0;
   const scrollRef = useRef<ScrollView>(null);
 
   const st = calcBodyStats(profile, weights);
@@ -97,16 +102,29 @@ export default function MyScreen() {
       router.push('/subscribe?f=ai_coach');
       return;
     }
+    if (coachEmpty) return;
     const text = chatInput.trim();
     setChatInput('');
     addChat({ role: 'user', content: text });
     setChatBusy(true);
     try {
-      const reply = await askCoach([...chat, { role: 'user', content: text }], coachContext());
+      const { reply, quota: next } = await askCoach(
+        [...chat, { role: 'user', content: text }],
+        coachContext()
+      );
       addChat({ role: 'assistant', content: reply });
+      if (next) setQuota(next);
     } catch (e) {
       if (e instanceof SubscriptionRequired) {
         router.push('/subscribe?f=ai_coach');
+        return;
+      }
+      if (e instanceof CoachQuotaExceeded) {
+        setQuota({ used: e.limit, limit: e.limit, remaining: 0 });
+        addChat({
+          role: 'assistant',
+          content: `이번 달 코치 대화 ${e.limit}회를 모두 사용했습니다. 다음 달 1일에 다시 채워집니다.`,
+        });
         return;
       }
       addChat({
@@ -291,6 +309,11 @@ export default function MyScreen() {
         <View style={s.sectionRowInline}>
           <Text style={s.sectionLabel}>AI 코치</Text>
           {!canCoach && <ProBadge style={{ marginBottom: 10 }} />}
+          {canCoach && quota && !quota.unlimited && (
+            <Text style={[s.quotaTxt, coachEmpty && s.quotaTxtOut]}>
+              이번 달 {quota.remaining}/{quota.limit}회 남음
+            </Text>
+          )}
         </View>
         {!canCoach ? (
           <ProLock feature="ai_coach" />
@@ -315,15 +338,20 @@ export default function MyScreen() {
           </View>
           <View style={s.chatInRow}>
             <TextInput
-              style={s.chatInput}
-              placeholder="코치에게 질문하기"
+              style={[s.chatInput, coachEmpty && s.chatInputOff]}
+              placeholder={coachEmpty ? '다음 달 1일에 다시 채워집니다' : '코치에게 질문하기'}
               placeholderTextColor={colors.muted}
               value={chatInput}
               onChangeText={setChatInput}
               onSubmitEditing={handleChat}
               returnKeyType="send"
+              editable={!coachEmpty}
             />
-            <TouchableOpacity style={s.chatSend} onPress={handleChat}>
+            <TouchableOpacity
+              style={[s.chatSend, coachEmpty && s.chatSendOff]}
+              onPress={handleChat}
+              disabled={coachEmpty}
+            >
               <Text style={s.chatSendTxt}>↑</Text>
             </TouchableOpacity>
           </View>
@@ -436,6 +464,10 @@ const s = StyleSheet.create({
   weightBtnTxt: { color: colors.bg, fontSize: 13, fontWeight: '700' },
 
   sectionRowInline: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  quotaTxt: { fontSize: 10.5, color: colors.muted, marginBottom: 10, marginLeft: 'auto' },
+  quotaTxtOut: { color: colors.wrong },
+  chatInputOff: { opacity: 0.5 },
+  chatSendOff: { opacity: 0.4 },
   subRow: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     backgroundColor: colors.panel, borderRadius: 16, padding: 16,

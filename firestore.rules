@@ -54,6 +54,13 @@ service cloud.firestore {
              (('sub' in resource.data) && request.resource.data.sub == resource.data.sub);
     }
 
+    // 코치 사용량도 서버만 쓴다. 클라이언트가 고칠 수 있으면 한도가 무의미하다.
+    function coachUsageUnchanged() {
+      return !('coachUsage' in request.resource.data) ||
+             (('coachUsage' in resource.data) &&
+              request.resource.data.coachUsage == resource.data.coachUsage);
+    }
+
     // ── users ─────────────────────────────────────────────────────────────
     match /users/{userId} {
       allow get: if isOwner(userId) || isAdmin();
@@ -62,8 +69,10 @@ service cloud.firestore {
       // 가입 시 본인 문서 생성 — 스스로 admin 이나 구독을 부여할 수 없다
       allow create: if (isOwner(userId)
                         && request.resource.data.role == 'user'
-                        && !('sub' in request.resource.data)) || isAdmin();
-      allow update: if (isOwner(userId) && roleUnchanged() && subUnchanged()) || isAdmin();
+                        && !('sub' in request.resource.data)
+                        && !('coachUsage' in request.resource.data)) || isAdmin();
+      allow update: if (isOwner(userId) && roleUnchanged() && subUnchanged()
+                        && coachUsageUnchanged()) || isAdmin();
       allow delete: if isOwner(userId) || isAdmin();
     }
 

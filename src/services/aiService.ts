@@ -44,6 +44,23 @@ function asSubRequired(e: unknown): SubscriptionRequired | null {
   return new SubscriptionRequired(err.message || '구독이 필요합니다.', d.feature ?? '');
 }
 
+/** 이번 달 코치 대화 횟수를 다 썼다 */
+export class CoachQuotaExceeded extends Error {
+  readonly limit: number;
+  constructor(message: string, limit: number) {
+    super(message);
+    this.limit = limit;
+  }
+}
+
+function asQuotaExceeded(e: unknown): CoachQuotaExceeded | null {
+  const err = e as FunctionsError;
+  if (err?.code !== 'functions/resource-exhausted') return null;
+  const d = err.details as { reason?: string; limit?: number } | undefined;
+  if (d?.reason !== 'coach_quota_exceeded') return null;
+  return new CoachQuotaExceeded(err.message || '이번 달 코치 대화를 모두 사용했습니다.', Number(d.limit) || 0);
+}
+
 function isUnavailable(e: unknown): boolean {
   const code = (e as FunctionsError)?.code ?? '';
   return (
@@ -109,19 +126,34 @@ export interface CoachMessage {
   content: string;
 }
 
+/** 남은 코치 대화 횟수 — 서버가 계산해서 내려 준다 (앱은 표시만) */
+export interface CoachQuota {
+  used: number;
+  limit: number;
+  remaining: number;
+  unlimited?: boolean;
+}
+
+export interface CoachReply {
+  reply: string;
+  quota?: CoachQuota;
+}
+
 export async function askCoach(
   messages: CoachMessage[],
   context: string
-): Promise<string> {
+): Promise<CoachReply> {
   try {
     const call = httpsCallable(functions, 'aiCoach');
     const res = await call({ messages, context });
-    const reply = (res.data as { reply?: string })?.reply;
-    if (reply) return reply;
+    const d = res.data as { reply?: string; quota?: CoachQuota };
+    if (d?.reply) return { reply: d.reply, quota: d.quota };
     throw new AIUnavailable();
   } catch (e) {
     const need = asSubRequired(e);
     if (need) throw need;
+    const over = asQuotaExceeded(e);
+    if (over) throw over;
     if (!isUnavailable(e)) console.warn('[aiCoach]', e);
     throw new AIUnavailable('코치 연결에 실패했습니다. 잠시 후 다시 시도해주세요.');
   }
