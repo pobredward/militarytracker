@@ -11,7 +11,10 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.militarytracker.app",
-      "userInterfaceStyle": "dark"
+      "userInterfaceStyle": "dark",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -45,6 +48,9 @@
     ],
     "experiments": {
       "typedRoutes": false
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
     }
   }
 }
