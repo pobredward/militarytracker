@@ -1,7 +1,7 @@
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { colors } from '../../src/utils/colors';
-import { Screen, TopBar, Body, SectionLabel } from '../../src/components/ui';
+import { Screen, TopBar, Body, SectionLabel, useSafeBack } from '../../src/components/ui';
 import { ROUTINES, recommendRoutine, routineExCount } from '../../src/data/routines';
 import { useAppStore } from '../../src/stores/appStore';
 import { useEntitlement } from '../../src/hooks/useEntitlement';
@@ -9,6 +9,7 @@ import { ProBadge } from '../../src/components/ProLock';
 
 export default function RoutineListScreen() {
   const router = useRouter();
+  const goBack = useSafeBack();
   const { profile, plan } = useAppStore();
 
   // 추천은 구독 기능 — 구독 전에는 배지를 걸지 않는다
@@ -20,14 +21,14 @@ export default function RoutineListScreen() {
 
   return (
     <Screen>
-      <TopBar title="루틴" meta="ROUTINE LIBRARY" onBack={() => router.back()} />
+      <TopBar title="루틴" meta="ROUTINE LIBRARY" onBack={goBack} />
       <Body>
         <Text style={s.lead}>
           분할 방식을 고르면 데이별 종목까지 바로 확인할 수 있습니다.
         </Text>
 
         {!canReco && (
-          <TouchableOpacity style={s.recoLock} onPress={() => router.push('/subscribe?f=routine_reco')}>
+          <TouchableOpacity activeOpacity={0.7} style={s.recoLock} onPress={() => router.push('/subscribe?f=routine_reco')}>
             <Text style={s.recoLockTxt}>내 조건에 맞는 루틴 추천받기</Text>
             <ProBadge />
           </TouchableOpacity>
@@ -100,9 +101,9 @@ const s = StyleSheet.create({
   sub: { fontSize: 11.5, color: colors.muted, marginTop: 3 },
   chev: { fontSize: 22, color: colors.muted, marginLeft: 4 },
   badge: { backgroundColor: colors.ink, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  badgeTxt: { fontSize: 9, fontWeight: '800', color: colors.bg },
+  badgeTxt: { fontSize: 10, fontWeight: '800', color: colors.bg },
   badgeGhost: { backgroundColor: colors.panel3, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  badgeGhostTxt: { fontSize: 9, fontWeight: '800', color: colors.mid },
+  badgeGhostTxt: { fontSize: 10, fontWeight: '800', color: colors.mid },
   desc: { fontSize: 12.5, color: colors.mid, lineHeight: 19, marginTop: 12 },
   tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
   tag: { backgroundColor: colors.panel3, borderRadius: 7, paddingHorizontal: 8, paddingVertical: 4 },

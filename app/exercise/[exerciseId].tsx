@@ -1,26 +1,29 @@
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors } from '../../src/utils/colors';
-import { Screen, TopBar, Body, SectionLabel, EmptyState, Notice } from '../../src/components/ui';
+import { Screen, TopBar, Body, SectionLabel, EmptyState, Notice, useSafeBack } from '../../src/components/ui';
 import ExerciseMedia from '../../src/components/ExerciseMedia';
 import { exById, exByPart, EQUIP_LABEL, LEVEL_LABEL, PART_LABEL, PPL_LABEL } from '../../src/data/exercises';
 import { formByExId } from '../../src/data/formCheck';
 import { useMediaEntry } from '../../src/stores/mediaStore';
 import { rirFor, RISK_NOTE, ROM_NOTE } from '../../src/data/coaching';
 import { useAppStore } from '../../src/stores/appStore';
-import { lastRecordOf, personalBest, e1rm } from '../../src/utils/stats';
+import { useAuthStore } from '../../src/stores/authStore';
+import { lastRecordOf, personalBest, e1rm, fmtSetDetail } from '../../src/utils/stats';
 
 export default function ExerciseDetailScreen() {
   const { exerciseId } = useLocalSearchParams<{ exerciseId: string }>();
   const router = useRouter();
-  const { logs } = useAppStore();
+  const goBack = useSafeBack();
+  const logs = useAppStore((s) => s.logs);
+  const stats = useAuthStore((s) => s.user?.stats);
   const hasVideo = !!useMediaEntry(String(exerciseId))?.video;
 
   const e = exById(String(exerciseId));
   if (!e) {
     return (
       <Screen>
-        <TopBar title="종목" onBack={() => router.back()} />
+        <TopBar title="종목" onBack={goBack} />
         <EmptyState text="종목을 찾을 수 없습니다." />
       </Screen>
     );
@@ -28,14 +31,14 @@ export default function ExerciseDetailScreen() {
 
   const form = formByExId(e.id);
   const last = lastRecordOf(logs, e.id);
-  const pb = personalBest(logs, e.id);
+  const pb = personalBest(logs, e.id, stats);
   const related = exByPart(e.part).filter((x) => x.id !== e.id).slice(0, 6);
   const rir = rirFor(e);
   const risk = RISK_NOTE[e.id];
 
   return (
     <Screen>
-      <TopBar title={e.n} meta={PART_LABEL[e.part]} onBack={() => router.back()} />
+      <TopBar title={e.n} meta={PART_LABEL[e.part]} onBack={goBack} />
       <Body style={{ paddingHorizontal: 0 }}>
         <ExerciseMedia
           exId={e.id}
@@ -85,8 +88,8 @@ export default function ExerciseDetailScreen() {
             <View style={s.pbBox}>
               <Text style={s.pbLabel}>개인 기록</Text>
               <Text style={s.pbVal}>
-                {pb.w}kg × {pb.r}
-                <Text style={s.pbEst}>  ·  추정 1RM {Math.round(e1rm(pb.w, pb.r))}kg</Text>
+                {pb.w > 0 ? `${pb.w}kg × ${pb.r}` : fmtSetDetail(pb)}
+                {pb.w > 0 ? <Text style={s.pbEst}>  ·  추정 1RM {Math.round(e1rm(pb.w, pb.r))}kg</Text> : null}
               </Text>
             </View>
           )}
@@ -125,7 +128,10 @@ export default function ExerciseDetailScreen() {
                     key={r.id}
                     style={s.relCard}
                     activeOpacity={0.75}
-                    onPress={() => router.push(`/exercise/${r.id}`)}
+                    // push 를 반복하면 스택이 무한히 쌓인다 — 같은 화면은 교체한다
+                    onPress={() => router.replace(`/exercise/${r.id}`)}
+                    accessibilityRole="button"
+                    accessibilityLabel={r.n}
                   >
                     <ExerciseMedia exId={r.id} rounded={12} style={s.relThumb} dim={0.35} />
                     <Text style={s.relName} numberOfLines={2}>{r.n}</Text>
@@ -196,17 +202,17 @@ const s = StyleSheet.create({
   rirNote: { fontSize: 12.5, color: colors.mid, lineHeight: 19 },
 
   riskBox: {
-    backgroundColor: 'rgba(228,88,88,0.08)', borderRadius: 14, padding: 14,
-    borderWidth: 1, borderColor: 'rgba(228,88,88,0.3)', marginTop: 10,
+    backgroundColor: colors.wrongBg, borderRadius: 14, padding: 14,
+    borderWidth: 1, borderColor: colors.wrongLine, marginTop: 10,
   },
   riskTitle: { fontSize: 11, fontWeight: '800', color: colors.wrong, letterSpacing: 0.5, marginBottom: 6 },
   riskTxt: { fontSize: 13, color: colors.ink, lineHeight: 20 },
 
   pbBox: {
-    backgroundColor: 'rgba(168,197,160,0.1)', borderRadius: 12, padding: 12,
-    borderWidth: 1, borderColor: 'rgba(168,197,160,0.3)', marginTop: 10,
+    backgroundColor: colors.goodBg, borderRadius: 12, padding: 12,
+    borderWidth: 1, borderColor: colors.goodLine, marginTop: 10,
   },
-  pbLabel: { fontSize: 9.5, fontWeight: '800', color: colors.good, letterSpacing: 1.5 },
+  pbLabel: { fontSize: 10, fontWeight: '800', color: colors.good, letterSpacing: 1.5 },
   pbVal: { fontSize: 15, fontWeight: '800', color: colors.ink, marginTop: 5 },
   pbEst: { fontSize: 11, fontWeight: '600', color: colors.mid },
   lastBox: {
@@ -221,8 +227,8 @@ const s = StyleSheet.create({
     width: 22, height: 22, borderRadius: 11,
     alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1,
   },
-  pIconW: { backgroundColor: 'rgba(228,88,88,0.15)' },
-  pIconC: { backgroundColor: 'rgba(168,197,160,0.16)' },
+  pIconW: { backgroundColor: colors.wrongBg },
+  pIconC: { backgroundColor: colors.goodBg },
   pointIconTxt: { fontSize: 11, fontWeight: '700' },
   pTxtW: { color: colors.wrong },
   pTxtC: { color: colors.good },

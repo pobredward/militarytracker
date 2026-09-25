@@ -13,7 +13,7 @@ export default function Root({ children }: PropsWithChildren) {
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
         <meta
           name="viewport"
-          content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
+          content="width=device-width, initial-scale=1, viewport-fit=cover"
         />
         <meta name="theme-color" content="#09090A" />
         <meta name="color-scheme" content="dark" />
@@ -48,6 +48,8 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard',
     'Noto Sans KR', 'Segoe UI', Roboto, sans-serif;
 }
+/* maximum-scale=1 로 핀치줌을 막지 않는다(접근성). 대신 입력창을 16px 이상으로 두어 iOS Safari 자동 줌을 피한다 */
+input, textarea { font-size: max(16px, 1em); }
 /* 프레임 안에서 스크롤바가 레이아웃을 흔들지 않도록 */
 ::-webkit-scrollbar { width: 0; height: 0; }
 * { scrollbar-width: none; }

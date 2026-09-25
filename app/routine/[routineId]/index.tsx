@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors } from '../../../src/utils/colors';
 import { showAlert } from '../../../src/utils/alert';
-import { Screen, TopBar, Body, SectionLabel, PrimaryBtn, EmptyState } from '../../../src/components/ui';
+import { Screen, TopBar, Body, SectionLabel, PrimaryBtn, EmptyState, useSafeBack } from '../../../src/components/ui';
 import ExerciseMedia from '../../../src/components/ExerciseMedia';
 import { routineById, routineExCount } from '../../../src/data/routines';
 import { exByIds } from '../../../src/data/exercises';
@@ -15,6 +15,7 @@ import { useAuthStore } from '../../../src/stores/authStore';
 export default function RoutineDetailScreen() {
   const { routineId, onboard } = useLocalSearchParams<{ routineId: string; onboard?: string }>();
   const router = useRouter();
+  const goBack = useSafeBack();
   const { user } = useAuthStore();
   const { plan, setPlan } = useAppStore();
   const [applying, setApplying] = useState(false);
@@ -26,7 +27,7 @@ export default function RoutineDetailScreen() {
   if (!routine) {
     return (
       <Screen>
-        <TopBar title="루틴" onBack={() => router.back()} />
+        <TopBar title="루틴" onBack={goBack} />
         <EmptyState text="루틴을 찾을 수 없습니다." />
       </Screen>
     );

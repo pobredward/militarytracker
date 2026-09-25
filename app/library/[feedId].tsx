@@ -1,7 +1,7 @@
 import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors } from '../../src/utils/colors';
-import { Screen, TopBar, Body, SectionLabel, EmptyState } from '../../src/components/ui';
+import { Screen, TopBar, Body, SectionLabel, EmptyState, useSafeBack } from '../../src/components/ui';
 import ExerciseMedia from '../../src/components/ExerciseMedia';
 import { feedById } from '../../src/data/feed';
 import { exByIds, PART_LABEL } from '../../src/data/exercises';
@@ -9,12 +9,13 @@ import { exByIds, PART_LABEL } from '../../src/data/exercises';
 export default function LibraryDetailScreen() {
   const { feedId } = useLocalSearchParams<{ feedId: string }>();
   const router = useRouter();
+  const goBack = useSafeBack();
   const item = feedById(String(feedId));
 
   if (!item) {
     return (
       <Screen>
-        <TopBar title="라이브러리" onBack={() => router.back()} />
+        <TopBar title="라이브러리" onBack={goBack} />
         <EmptyState text="콘텐츠를 찾을 수 없습니다." />
       </Screen>
     );
@@ -24,7 +25,7 @@ export default function LibraryDetailScreen() {
 
   return (
     <Screen>
-      <TopBar title={item.n} meta={item.cnt} onBack={() => router.back()} />
+      <TopBar title={item.n} meta={item.cnt} onBack={goBack} />
       <Body style={{ paddingHorizontal: 0 }}>
         <View style={s.hero}>
           <Image source={item.img} style={s.heroImg} resizeMode="cover" />

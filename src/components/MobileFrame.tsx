@@ -1,6 +1,13 @@
 import { ReactNode } from 'react';
 import { Platform, View, Text, StyleSheet, useWindowDimensions } from 'react-native';
+import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import { colors } from '../utils/colors';
+
+/**
+ * 프레임 안에서 쓸 가짜 세이프에리어. 웹은 env(safe-area-inset-*) 가 0 이라
+ * 노치가 헤더를 덮었다 — 실제 기기와 같은 값을 넣어 준다.
+ */
+const FRAME_INSETS = { top: 44, bottom: 24, left: 0, right: 0 };
 
 const FRAME_W = 412;
 const FRAME_H = 892;
@@ -35,7 +42,10 @@ export default function MobileFrame({ children }: { children: ReactNode }) {
 
       <View style={[s.frame, { width: FRAME_W, height: frameH }]}>
         <View style={s.notch} />
-        <View style={s.screen}>{children}</View>
+        <SafeAreaInsetsContext.Provider value={FRAME_INSETS}>
+          <View style={s.screen}>{children}</View>
+        </SafeAreaInsetsContext.Provider>
+        <View style={s.homeBar} />
       </View>
     </View>
   );
@@ -48,7 +58,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 56,
-    backgroundColor: '#050506',
+    backgroundColor: colors.bgDeep,
     padding: 24,
   },
   side: { maxWidth: 320 },
@@ -59,7 +69,7 @@ const s = StyleSheet.create({
     backgroundColor: colors.bg,
     borderRadius: 44,
     borderWidth: 6,
-    borderColor: '#1C1C20',
+    borderColor: colors.frame,
     overflow: 'hidden',
     position: 'relative',
     // 웹 전용 그림자
@@ -72,8 +82,12 @@ const s = StyleSheet.create({
     width: 108,
     height: 24,
     borderRadius: 14,
-    backgroundColor: '#000',
+    backgroundColor: colors.bgDeep,
     zIndex: 100,
+  },
+  homeBar: {
+    position: 'absolute', bottom: 8, alignSelf: 'center',
+    width: 120, height: 4, borderRadius: 2, backgroundColor: colors.line2, zIndex: 100,
   },
   screen: { flex: 1, overflow: 'hidden' },
 });

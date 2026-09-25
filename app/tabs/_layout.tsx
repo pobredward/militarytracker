@@ -1,5 +1,6 @@
 import { Tabs } from 'expo-router';
 import { View, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/utils/colors';
 import { useAppStore } from '../../src/stores/appStore';
@@ -17,8 +18,9 @@ function TabIcon({ name, focused }: { name: IoniconName; focused: boolean }) {
 }
 
 const ic = StyleSheet.create({
-  wrap: { width: 40, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  wrapActive: { backgroundColor: colors.panel2 },
+  wrap: { width: 44, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  // panel2 는 bg 대비 1.12:1 라 있으나 마나였다 — 채움 아이콘 + ink 색이 실제 활성 표시고, 배경은 조금 더 띄운다
+  wrapActive: { backgroundColor: colors.panel3 },
 });
 
 export default function TabLayout() {
@@ -27,6 +29,9 @@ export default function TabLayout() {
   const session = useAppStore((s) => s.session);
   const summary = useAppStore((s) => s.summary);
   const overlay = !!session || !!summary;
+  const insets = useSafeAreaInsets();
+  // height/paddingBottom 을 고정하면 react-navigation 의 inset 계산을 덮어써 홈 인디케이터 위에 라벨이 앉는다
+  const bottomPad = Math.max(insets.bottom, 10);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -40,13 +45,14 @@ export default function TabLayout() {
                 backgroundColor: colors.bg,
                 borderTopColor: colors.line,
                 borderTopWidth: 0.5,
-                height: 72,
+                height: 58 + bottomPad,
                 paddingTop: 6,
-                paddingBottom: 14,
+                paddingBottom: bottomPad,
               },
           tabBarActiveTintColor: colors.ink,
           tabBarInactiveTintColor: colors.muted,
-          tabBarLabelStyle: { fontSize: 10, fontWeight: '600', letterSpacing: 0.2 },
+          tabBarLabelStyle: { fontSize: 11, fontWeight: '600', letterSpacing: 0.2 },
+          tabBarAllowFontScaling: false,
           tabBarShowLabel: true,
         }}
       >

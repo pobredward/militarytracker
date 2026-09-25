@@ -137,15 +137,15 @@ const s = StyleSheet.create({
   fill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%' },
   phCenter: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   phTxt: { fontSize: 15, fontWeight: '800', color: 'rgba(255,255,255,0.75)', letterSpacing: 1 },
-  phSub: { fontSize: 9.5, color: 'rgba(255,255,255,0.4)', marginTop: 4, letterSpacing: 0.5 },
+  phSub: { fontSize: 11, color: 'rgba(255,255,255,0.78)', marginTop: 4, letterSpacing: 0.5 },
   badge: {
     position: 'absolute', top: 10, right: 10,
     backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 7,
     paddingHorizontal: 8, paddingVertical: 4,
     borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.15)',
   },
-  badgeTxt: { fontSize: 9.5, fontWeight: '800', color: colors.ink, letterSpacing: 0.5 },
+  badgeTxt: { fontSize: 10, fontWeight: '800', color: colors.ink, letterSpacing: 0.5 },
   label: { position: 'absolute', left: 12, right: 12, bottom: 12 },
   labelName: { fontSize: 15, fontWeight: '800', color: colors.ink },
-  labelPart: { fontSize: 10.5, color: 'rgba(255,255,255,0.6)', marginTop: 2 },
+  labelPart: { fontSize: 11, color: 'rgba(255,255,255,0.78)', marginTop: 2 },
 });

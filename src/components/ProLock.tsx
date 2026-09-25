@@ -34,7 +34,7 @@ export function ProLock({
         <ProBadge />
       </View>
       <Text style={s.desc}>{desc ?? FEATURE_DESC[feature]}</Text>
-      <TouchableOpacity style={s.btn} onPress={() => router.push(`/subscribe?f=${feature}`)}>
+      <TouchableOpacity activeOpacity={0.7} style={s.btn} onPress={() => router.push(`/subscribe?f=${feature}`)}>
         <Text style={s.btnTxt}>{cta}</Text>
       </TouchableOpacity>
     </View>
@@ -47,7 +47,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 6, paddingVertical: 2,
     borderWidth: 0.5, borderColor: colors.line2,
   },
-  badgeTxt: { fontSize: 8.5, fontWeight: '800', color: colors.mid, letterSpacing: 0.6 },
+  badgeTxt: { fontSize: 10, fontWeight: '800', color: colors.mid, letterSpacing: 0.6 },
 
   card: {
     backgroundColor: colors.panel, borderRadius: 16, padding: 18,

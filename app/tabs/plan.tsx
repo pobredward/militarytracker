@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, } from 'react-native';
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors } from '../../src/utils/colors';
@@ -10,7 +11,7 @@ import { useAuthStore } from '../../src/stores/authStore';
 import { exById, EQUIP_LABEL, PART_LABEL } from '../../src/data/exercises';
 import { routineById } from '../../src/data/routines';
 import { savePlan } from '../../src/services/authService';
-import { generatePlan, SubscriptionRequired } from '../../src/services/aiService';
+import { generatePlan, SubscriptionRequired, QuotaExceeded } from '../../src/services/aiService';
 import { useEntitlement } from '../../src/hooks/useEntitlement';
 import { buildLocalPlan } from '../../src/utils/planner';
 import ExerciseMedia from '../../src/components/ExerciseMedia';
@@ -20,8 +21,13 @@ const SRC_LABEL: Record<string, string> = { AI: 'AI 구성', LOCAL: '자동 구�
 
 export default function PlanScreen() {
   const router = useRouter();
-  const { user } = useAuthStore();
-  const { plan, profile, startSession, setPlan } = useAppStore();
+  const user = useAuthStore((s) => s.user);
+  const hydrating = useAuthStore((s) => s.hydrating);
+  const plan = useAppStore((s) => s.plan);
+  const profile = useAppStore((s) => s.profile);
+  const session = useAppStore((s) => s.session);
+  const startSession = useAppStore((s) => s.startSession);
+  const setPlan = useAppStore((s) => s.setPlan);
   const [activeDay, setActiveDay] = useState(0);
   const [busy, setBusy] = useState<'ai' | 'local' | null>(null);
   // '자동 재구성'(결정형 알고리즘)은 무료다 — 구독 없이도 플랜을 새로 짤 수 있어야 한다
@@ -33,31 +39,70 @@ export default function PlanScreen() {
     if (plan && activeDay > plan.days.length - 1) setActiveDay(0);
   }, [plan]);
 
-  async function regenerate(mode: 'ai' | 'local') {
+  function regenerate(mode: 'ai' | 'local') {
     if (!profile || !user) {
-      showAlert('알림', '신체 정보가 없습니다. MY 탭에서 온보딩 정보를 확인해주세요.');
+      showAlert('알림', '신체 정보가 없습니다. 내 정보에서 신체 정보를 입력해주세요.', [
+        { text: '취소', style: 'cancel' },
+        { text: '내 정보로 이동', onPress: () => router.push('/profile/edit') },
+      ]);
       return;
     }
     if (mode === 'ai' && !canAI) {
       router.push('/subscribe?f=ai_plan');
       return;
     }
+    if (session) {
+      showAlert('진행 중인 운동이 있습니다', '운동을 마치거나 종료한 뒤 플랜을 바꿔주세요.');
+      return;
+    }
+    // 재구성은 현재 플랜을 덮어쓰고 되돌릴 수 없다 — 확인을 받는다
+    const label = plan?.routineId ? `현재 루틴(${routineById(plan.routineId)?.name ?? '프리셋'})` : '현재 플랜';
+    showAlert(
+      mode === 'ai' ? 'AI로 다시 구성' : '자동 재구성',
+      `${label}을 새 구성으로 바꿉니다. 이전 플랜은 되돌릴 수 없습니다. 진행할까요?`,
+      [
+        { text: '취소', style: 'cancel' },
+        { text: '진행', onPress: () => doRegenerate(mode) },
+      ]
+    );
+  }
+
+  async function doRegenerate(mode: 'ai' | 'local') {
+    if (!profile || !user) return;
     setBusy(mode);
     try {
       // 로컬 생성은 매번 다른 시드를 사용해 같은 결과가 반복되지 않는다
-      const next = mode === 'ai' ? await generatePlan(profile) : buildLocalPlan(profile, Date.now());
+      let next = buildLocalPlan(profile, Date.now());
+      let fallbackReason: string | null = null;
+      if (mode === 'ai') {
+        const r = await generatePlan(profile);
+        next = r.plan;
+        if (r.fallback) fallbackReason = r.reason ?? 'AI 서버에 연결하지 못했습니다.';
+      }
       await savePlan(user.uid, next);
       setPlan(next);
       setActiveDay(0);
-      if (mode === 'ai' && next.planSrc !== 'AI') {
-        showAlert('자동 구성으로 대체', 'AI 서버에 연결하지 못해 자동 알고리즘으로 구성했습니다.');
+      if (fallbackReason) {
+        showAlert('자동 구성으로 대체', `${fallbackReason} 자동 알고리즘으로 구성했습니다.`);
       }
     } catch (e) {
       if (e instanceof SubscriptionRequired) router.push('/subscribe?f=ai_plan');
+      else if (e instanceof QuotaExceeded) showAlert('오늘 한도 초과', `${e.message} 자동 재구성은 계속 이용할 수 있습니다.`);
       else showAlert('오류', '플랜 재생성에 실패했습니다.');
     } finally {
       setBusy(null);
     }
+  }
+
+  if (!plan && hydrating) {
+    return (
+      <SafeAreaView style={s.root} edges={['top']}>
+        <View style={s.empty}>
+          <ActivityIndicator color={colors.muted} />
+          <Text style={[s.emptyTxt, { marginTop: 12 }]}>플랜을 불러오는 중…</Text>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   if (!plan) {
@@ -65,7 +110,7 @@ export default function PlanScreen() {
       <SafeAreaView style={s.root} edges={['top']}>
         <View style={s.empty}>
           <Text style={s.emptyTxt}>플랜이 없습니다.{'\n'}루틴을 선택해 시작하세요.</Text>
-          <TouchableOpacity style={s.emptyBtn} onPress={() => router.push('/routine')}>
+          <TouchableOpacity activeOpacity={0.7} style={s.emptyBtn} onPress={() => router.push('/routine')}>
             <Text style={s.emptyBtnTxt}>루틴 라이브러리</Text>
           </TouchableOpacity>
         </View>
@@ -100,7 +145,7 @@ export default function PlanScreen() {
       {/* Day pills */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.pillScroll} contentContainerStyle={s.pillContent}>
         {plan.days.map((d, i) => (
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={0.7}
             key={`${d.id}-${i}`}
             style={[s.pill, activeDay === i && s.pillActive]}
             onPress={() => setActiveDay(i)}
@@ -117,7 +162,7 @@ export default function PlanScreen() {
             <Text style={s.dayName}>{day.name}</Text>
             <Text style={s.dayFocus}>{day.focus}</Text>
           </View>
-          <TouchableOpacity style={s.startBtn} onPress={() => startSession(dayIdx)}>
+          <TouchableOpacity activeOpacity={0.7} style={s.startBtn} onPress={() => startSession(dayIdx)}>
             <Text style={s.startBtnTxt}>▶  시작</Text>
           </TouchableOpacity>
         </View>
@@ -226,12 +271,12 @@ const s = StyleSheet.create({
   },
   exThumb: { width: 56, height: 56 },
   exInfo: { flex: 1 },
-  exOrder: { fontSize: 9, fontWeight: '800', color: colors.muted, letterSpacing: 1 },
+  exOrder: { fontSize: 10, fontWeight: '800', color: colors.muted, letterSpacing: 1 },
   exName: { fontSize: 15, fontWeight: '600', color: colors.ink, marginTop: 2 },
   exPart: { fontSize: 11, color: colors.muted, marginTop: 3 },
   exSetsWrap: { alignItems: 'center', minWidth: 42 },
   exSetsNum: { fontSize: 20, fontWeight: '800', color: colors.ink, lineHeight: 24 },
-  exSetsSub: { fontSize: 9.5, color: colors.muted, letterSpacing: 0.5 },
+  exSetsSub: { fontSize: 10, color: colors.muted, letterSpacing: 0.5 },
   exRep: { fontSize: 11, color: colors.mid, marginTop: 2 },
 
   regenRow: { flexDirection: 'row', gap: 10, marginTop: 4 },

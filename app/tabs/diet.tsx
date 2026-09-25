@@ -8,7 +8,7 @@ import { showAlert } from '../../src/utils/alert';
 import { useAppStore } from '../../src/stores/appStore';
 import { useAuthStore } from '../../src/stores/authStore';
 import { calcBodyStats, effectiveWeight, FOOD_LABEL, GOAL_LABEL } from '../../src/utils/body';
-import { generateDiet, SubscriptionRequired } from '../../src/services/aiService';
+import { generateDiet, SubscriptionRequired, QuotaExceeded } from '../../src/services/aiService';
 import { useEntitlement } from '../../src/hooks/useEntitlement';
 import { ProLock, ProBadge } from '../../src/components/ProLock';
 import { saveProfile } from '../../src/services/authService';
@@ -26,8 +26,16 @@ const daysSince = (iso?: string): number | null => {
 
 export default function DietScreen() {
   const router = useRouter();
-  const { user, patchUser } = useAuthStore();
-  const { profile, weights, diet, dietLoading, setDiet, setDietLoading, setProfile } = useAppStore();
+  const user = useAuthStore((s) => s.user);
+  const patchUser = useAuthStore((s) => s.patchUser);
+  const hydrating = useAuthStore((s) => s.hydrating);
+  const profile = useAppStore((s) => s.profile);
+  const weights = useAppStore((s) => s.weights);
+  const diet = useAppStore((s) => s.diet);
+  const dietLoading = useAppStore((s) => s.dietLoading);
+  const setDiet = useAppStore((s) => s.setDiet);
+  const setDietLoading = useAppStore((s) => s.setDietLoading);
+  const setProfile = useAppStore((s) => s.setProfile);
   const { can } = useEntitlement();
   // 목표 칼로리·매크로는 계속 무료다. 구독으로 열리는 건 '하루 식단 구성'.
   const canDiet = can('ai_diet');
@@ -51,6 +59,7 @@ export default function DietScreen() {
     } catch (e) {
       // 화면을 띄워 둔 사이에 구독이 끝난 경우
       if (e instanceof SubscriptionRequired) router.push('/subscribe?f=ai_diet');
+      else if (e instanceof QuotaExceeded) showAlert('오늘 한도 초과', e.message);
       else showAlert('오류', '식단을 구성하지 못했습니다. 잠시 후 다시 시도해주세요.');
     } finally {
       setDietLoading(false);
@@ -64,10 +73,15 @@ export default function DietScreen() {
       await saveProfile(user.uid, next);
       setProfile(next);
       patchUser({ profile: next });
-      showAlert('기준 체중 갱신', `${eff.trend}kg 로 갱신했습니다. 목표 칼로리가 다시 계산됩니다.`);
+      showAlert('기준 체중 갱신', `${eff.trend}kg으로 갱신했습니다. 목표 칼로리가 다시 계산됩니다.`);
     } catch {
       showAlert('오류', '저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
     }
+  }
+
+  if (!profile && hydrating) {
+    // 로그인 직후 프로필이 오기 전 — "신체 정보가 필요합니다" 플래시를 막는다
+    return <SafeAreaView style={s.root} edges={['top']} />;
   }
 
   if (!st || !profile) {
@@ -77,7 +91,7 @@ export default function DietScreen() {
           <Text style={s.emptyTxt}>
             신체 정보가 필요합니다.{'\n'}내 정보를 입력하면 목표 칼로리를 계산합니다.
           </Text>
-          <TouchableOpacity style={s.emptyBtn} onPress={() => router.push('/profile/edit')}>
+          <TouchableOpacity activeOpacity={0.7} style={s.emptyBtn} onPress={() => router.push('/profile/edit')}>
             <Text style={s.emptyBtnTxt}>내 정보 입력</Text>
           </TouchableOpacity>
         </View>
@@ -116,7 +130,7 @@ export default function DietScreen() {
               최근 추세 <Text style={s.driftHi}>{eff.trend}kg</Text> 로 기준({eff.baseline}kg)과
               {' '}{Math.abs(eff.drift)}kg 차이가 납니다.
             </Text>
-            <TouchableOpacity style={s.driftBtn} onPress={applyTrendWeight}>
+            <TouchableOpacity activeOpacity={0.7} style={s.driftBtn} onPress={applyTrendWeight}>
               <Text style={s.driftBtnTxt}>기준 체중 갱신</Text>
             </TouchableOpacity>
           </View>
@@ -130,7 +144,7 @@ export default function DietScreen() {
           <MacroCard value={`${st.fat}`} unit="g" label="지방" />
         </View>
         <Text style={s.tdeeTxt}>
-          유지 칼로리(TDEE) 약 {st.tdee}kcal · Mifflin-St Jeor + 활동계수 1.5 · BMI {st.bmi} ({st.bodyType})
+          유지 칼로리(TDEE) 약 {st.tdee}kcal · Mifflin-St Jeor × 활동계수 {st.activityFactor}(주 {profile.days}일) · BMI {st.bmi} ({st.bodyType})
         </Text>
 
         <View style={s.sectionRow}>
@@ -180,7 +194,7 @@ export default function DietScreen() {
         )}
 
         {(canDiet || diet) && (
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={0.7}
             style={[s.genBtn, diet && !stale && s.genGhost, dietLoading && s.genOff]}
             onPress={genDiet}
             disabled={dietLoading}
@@ -196,7 +210,7 @@ export default function DietScreen() {
         )}
 
         {/* 막다른 길 방지 — 다음 행동 */}
-        <TouchableOpacity style={s.linkRow} onPress={() => router.push('/tabs/my')}>
+        <TouchableOpacity activeOpacity={0.7} style={s.linkRow} onPress={() => router.push('/coach')} accessibilityRole="button">
           <View style={{ flex: 1 }}>
             <Text style={s.linkTitle}>AI 코치에게 물어보기</Text>
             <Text style={s.linkSub}>대체 음식, 외식 메뉴, 보충제 등</Text>
@@ -212,9 +226,12 @@ export default function DietScreen() {
 
 function MacroCard({ value, unit, label }: { value: string; unit: string; label: string }) {
   return (
-    <View style={s.mbox}>
-      <Text style={s.mboxVal}>{value}<Text style={s.mboxUnit}>{unit}</Text></Text>
-      <Text style={s.mboxLabel}>{label}</Text>
+    <View style={s.mbox} accessible accessibilityLabel={`${label} ${value}${unit}`}>
+      {/* 4열 타일에서 '2713kcal' 이 단어 중간에서 줄바꿈되던 것 — 한 줄로 고정하고 폭에 맞춰 줄인다 */}
+      <Text style={s.mboxVal} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+        {value}<Text style={s.mboxUnit}>{unit}</Text>
+      </Text>
+      <Text style={s.mboxLabel} numberOfLines={1}>{label}</Text>
     </View>
   );
 }
@@ -239,14 +256,14 @@ const s = StyleSheet.create({
     backgroundColor: colors.panel2, borderRadius: 14, padding: 14,
     borderWidth: 1, borderColor: colors.line2, marginTop: 8, marginBottom: 10,
   },
-  basisLabel: { fontSize: 9.5, fontWeight: '800', color: colors.muted, letterSpacing: 1.5 },
+  basisLabel: { fontSize: 10, fontWeight: '800', color: colors.muted, letterSpacing: 1.5 },
   basisMain: { fontSize: 14, fontWeight: '700', color: colors.ink, marginTop: 5 },
   basisSub: { fontSize: 11, color: colors.muted, marginTop: 4 },
   basisChev: { fontSize: 20, color: colors.muted },
 
   driftBox: {
-    backgroundColor: 'rgba(168,197,160,0.09)', borderRadius: 14, padding: 14,
-    borderWidth: 1, borderColor: 'rgba(168,197,160,0.3)', marginBottom: 10, gap: 10,
+    backgroundColor: colors.goodBg, borderRadius: 14, padding: 14,
+    borderWidth: 1, borderColor: colors.goodLine, marginBottom: 10, gap: 10,
   },
   driftTxt: { fontSize: 12.5, color: colors.ink, lineHeight: 19 },
   driftHi: { fontWeight: '800', color: colors.good },
@@ -257,7 +274,7 @@ const s = StyleSheet.create({
   driftBtnTxt: { fontSize: 12, fontWeight: '700', color: colors.bg },
 
   sectionLabel: {
-    fontSize: 9.5, fontWeight: '800', color: colors.muted,
+    fontSize: 10, fontWeight: '800', color: colors.muted,
     letterSpacing: 2, marginBottom: 12, marginTop: 8,
   },
   sectionRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 8, flexWrap: 'wrap' },
@@ -268,8 +285,8 @@ const s = StyleSheet.create({
     flex: 1, backgroundColor: colors.panel, borderRadius: 16, padding: 14,
     borderWidth: 1, borderColor: colors.line,
   },
-  mboxVal: { fontSize: 20, fontWeight: '800', color: colors.ink, letterSpacing: -0.5 },
-  mboxUnit: { fontSize: 12, fontWeight: '600', color: colors.mid },
+  mboxVal: { fontSize: 19, fontWeight: '800', color: colors.ink, letterSpacing: -0.5 },
+  mboxUnit: { fontSize: 11, fontWeight: '600', color: colors.mid },
   mboxLabel: { fontSize: 10, color: colors.muted, marginTop: 4 },
   tdeeTxt: { fontSize: 11, color: colors.muted, lineHeight: 17, marginBottom: 6 },
 

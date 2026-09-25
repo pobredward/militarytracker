@@ -81,7 +81,7 @@ export default function SessionSummary() {
       </ScrollView>
 
       <View style={[s.foot, { paddingBottom: insets.bottom + 20 }]}>
-        <TouchableOpacity
+        <TouchableOpacity activeOpacity={0.7}
           style={s.ghost}
           onPress={() => {
             setSummary(null);
@@ -90,7 +90,7 @@ export default function SessionSummary() {
         >
           <Text style={s.ghostTxt}>{summary.prIds.length ? '개인 기록 보기' : '기록 전체 보기'}</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={s.primary} onPress={() => setSummary(null)}>
+        <TouchableOpacity activeOpacity={0.7} style={s.primary} onPress={() => setSummary(null)}>
           <Text style={s.primaryTxt}>확인</Text>
         </TouchableOpacity>
       </View>
@@ -117,8 +117,8 @@ const s = StyleSheet.create({
   title: { fontSize: 30, fontWeight: '800', color: colors.ink, marginTop: 8, letterSpacing: -0.6 },
 
   warn: {
-    backgroundColor: 'rgba(228,88,88,0.1)', borderRadius: 12, padding: 12,
-    borderWidth: 1, borderColor: 'rgba(228,88,88,0.3)', marginTop: 16,
+    backgroundColor: colors.wrongBg, borderRadius: 12, padding: 12,
+    borderWidth: 1, borderColor: colors.wrongLine, marginTop: 16,
   },
   warnTxt: { fontSize: 12.5, color: colors.ink, lineHeight: 19 },
 
@@ -131,15 +131,15 @@ const s = StyleSheet.create({
   statUnit: { fontSize: 10, color: colors.muted, marginTop: 5 },
 
   prBox: {
-    backgroundColor: 'rgba(168,197,160,0.1)', borderRadius: 16, padding: 16,
-    borderWidth: 1, borderColor: 'rgba(168,197,160,0.32)', marginTop: 12,
+    backgroundColor: colors.goodBg, borderRadius: 16, padding: 16,
+    borderWidth: 1, borderColor: colors.goodLine, marginTop: 12,
   },
   prTitle: { fontSize: 12.5, fontWeight: '800', color: colors.good, marginBottom: 8, letterSpacing: 0.3 },
   prLine: { fontSize: 14, color: colors.ink, lineHeight: 23 },
   prVal: { color: colors.good, fontWeight: '700' },
 
   section: {
-    fontSize: 9.5, fontWeight: '800', color: colors.muted,
+    fontSize: 10, fontWeight: '800', color: colors.muted,
     letterSpacing: 2, marginTop: 26, marginBottom: 12,
   },
   exRow: {

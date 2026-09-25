@@ -29,11 +29,12 @@ export default function FormScreen() {
   const videoCount = useVideoCount();
 
   const list = useMemo(() => {
-    const keyword = q.trim();
+    // 공백을 무시하고 비교 — "벤치 프레스" 로 "벤치프레스" 를 찾는다
+    const keyword = q.replace(/\s+/g, '');
     return EX.filter((e) => {
       if (filter === '영상' && !media[e.id]?.video) return false;
       if (filter !== '전체' && filter !== '영상' && e.part !== filter) return false;
-      if (keyword && !(e.n.includes(keyword) || e.g.includes(keyword))) return false;
+      if (keyword && !(e.n.replace(/\s+/g, '').includes(keyword) || e.g.replace(/\s+/g, '').includes(keyword))) return false;
       return true;
     });
   }, [filter, q, media]);
@@ -61,14 +62,15 @@ export default function FormScreen() {
         <TextInput
           style={s.search}
           placeholder="종목 검색 (예: 벤치, 광배)"
-          placeholderTextColor={colors.muted}
+          placeholderTextColor={colors.placeholder}
           value={q}
           onChangeText={setQ}
           autoCorrect={false}
           returnKeyType="search"
+          accessibilityLabel="종목 검색"
         />
         {q.length > 0 && (
-          <TouchableOpacity style={s.clear} onPress={() => setQ('')} hitSlop={10}>
+          <TouchableOpacity activeOpacity={0.7} style={s.clear} onPress={() => setQ('')} hitSlop={10} accessibilityRole="button" accessibilityLabel="검색어 지우기">
             <Text style={s.clearTxt}>✕</Text>
           </TouchableOpacity>
         )}
@@ -76,10 +78,13 @@ export default function FormScreen() {
 
       <View style={s.pillWrap}>
         {FILTERS.map((f) => (
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={0.7}
             key={String(f.key)}
             style={[s.pill, filter === f.key && s.pillActive]}
             onPress={() => setFilter(f.key)}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: filter === f.key }}
+            accessibilityLabel={f.label}
           >
             <Text style={[s.pillTxt, filter === f.key && s.pillTxtActive]}>{f.label}</Text>
           </TouchableOpacity>
@@ -93,6 +98,7 @@ export default function FormScreen() {
         columnWrapperStyle={s.row}
         contentContainerStyle={s.listInner}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         initialNumToRender={12}
         maxToRenderPerBatch={8}
         windowSize={7}
@@ -161,7 +167,7 @@ const s = StyleSheet.create({
   },
   pill: {
     backgroundColor: colors.panel2, borderRadius: 20,
-    paddingHorizontal: 15, paddingVertical: 8,
+    paddingHorizontal: 15, paddingVertical: 8, minHeight: 40, justifyContent: 'center',
     borderWidth: 1, borderColor: colors.line,
   },
   pillActive: { backgroundColor: colors.ink, borderColor: colors.ink },
@@ -173,7 +179,8 @@ const s = StyleSheet.create({
   descTxt: { fontSize: 12.5, color: colors.muted, lineHeight: 19, marginBottom: 14 },
   empty: { color: colors.muted, fontSize: 14, textAlign: 'center', marginTop: 40 },
 
-  card: { flex: 1 },
+  // 홀수 개일 때 마지막 카드가 전체 폭으로 늘어나지 않게
+  card: { flex: 1, maxWidth: '48.5%' },
   thumb: { width: '100%', aspectRatio: 1 },
   badgeRow: { flexDirection: 'row', gap: 4, marginTop: 8, flexWrap: 'wrap' },
   vBadge: {
@@ -181,19 +188,19 @@ const s = StyleSheet.create({
     paddingHorizontal: 6, paddingVertical: 2,
     borderWidth: 0.5, borderColor: 'rgba(244,244,245,0.25)',
   },
-  vBadgeTxt: { fontSize: 8.5, color: colors.ink, fontWeight: '700' },
+  vBadgeTxt: { fontSize: 10, color: colors.ink, fontWeight: '700' },
   okBadge: {
-    backgroundColor: 'rgba(168,197,160,0.18)', borderRadius: 5,
+    backgroundColor: colors.goodBg, borderRadius: 5,
     paddingHorizontal: 6, paddingVertical: 2,
-    borderWidth: 0.5, borderColor: 'rgba(168,197,160,0.35)',
+    borderWidth: 0.5, borderColor: colors.goodLine,
   },
-  okBadgeTxt: { fontSize: 8.5, color: colors.good, fontWeight: '700' },
+  okBadgeTxt: { fontSize: 10, color: colors.good, fontWeight: '700' },
   errBadge: {
-    backgroundColor: 'rgba(228,88,88,0.18)', borderRadius: 5,
+    backgroundColor: colors.wrongBg, borderRadius: 5,
     paddingHorizontal: 6, paddingVertical: 2,
-    borderWidth: 0.5, borderColor: 'rgba(228,88,88,0.35)',
+    borderWidth: 0.5, borderColor: colors.wrongLine,
   },
-  errBadgeTxt: { fontSize: 8.5, color: colors.wrong, fontWeight: '700' },
+  errBadgeTxt: { fontSize: 10, color: colors.wrong, fontWeight: '700' },
   name: { fontSize: 13, fontWeight: '700', color: colors.ink, marginTop: 7 },
   sub: { fontSize: 10.5, color: colors.mid, marginTop: 2 },
   meta2: { fontSize: 10, color: colors.muted, marginTop: 2 },

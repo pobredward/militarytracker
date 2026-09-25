@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, SectionList } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, SectionList, LayoutAnimation } from 'react-native';
 import { useRouter } from 'expo-router';
 import { colors } from '../../src/utils/colors';
-import { Screen, TopBar, EmptyState } from '../../src/components/ui';
+import { Screen, TopBar, EmptyState, useSafeBack } from '../../src/components/ui';
 import { useAppStore } from '../../src/stores/appStore';
+import { useAuthStore } from '../../src/stores/authStore';
 import { exById, PART_LABEL } from '../../src/data/exercises';
 import { WorkoutLog } from '../../src/types';
 import {
@@ -12,7 +13,9 @@ import {
 
 export default function HistoryScreen() {
   const router = useRouter();
-  const { logs } = useAppStore();
+  const goBack = useSafeBack();
+  const logs = useAppStore((s) => s.logs);
+  const stats = useAuthStore((s) => s.user?.stats);
   const [openId, setOpenId] = useState<string | null>(null);
 
   // 월별 그룹
@@ -32,29 +35,35 @@ export default function HistoryScreen() {
   if (!logs.length) {
     return (
       <Screen>
-        <TopBar title="운동 기록" onBack={() => router.back()} />
-        <EmptyState text={'아직 완료한 운동이 없습니다.\n첫 운동을 마치면 여기에 쌓입니다.'} />
+        <TopBar title="운동 기록" onBack={goBack} />
+        <EmptyState
+          text={'아직 완료한 운동이 없습니다.\n첫 운동을 마치면 여기에 쌓입니다.'}
+          cta="오늘 운동 시작하기"
+          onCta={() => router.replace('/tabs/home')}
+        />
       </Screen>
     );
   }
 
   const allSets = totalSets(logs);
-  const allVolume = totalVolume(logs);
+  // 누적치는 서버 요약이 있으면 그쪽 — 앱은 최근 60건만 들고 있다
+  const allLogs = Math.max(stats?.totalLogs ?? 0, logs.length);
+  const allVolume = Math.max(stats?.totalVolume ?? 0, totalVolume(logs));
 
   return (
     <Screen>
       <TopBar
         title="운동 기록"
-        onBack={() => router.back()}
+        onBack={goBack}
         right={
-          <TouchableOpacity onPress={() => router.push('/history/records')} hitSlop={8}>
+          <TouchableOpacity activeOpacity={0.7} onPress={() => router.push('/history/records')} hitSlop={8}>
             <Text style={s.prLink}>개인 기록 ›</Text>
           </TouchableOpacity>
         }
       />
 
       <View style={s.summaryRow}>
-        <Summary value={`${logs.length}`} label="총 운동" />
+        <Summary value={`${allLogs}`} label="총 운동" />
         <Summary value={`${allSets}`} label="총 세트" />
         <Summary value={fmtVolume(allVolume)} label="누적 볼륨" />
       </View>
@@ -76,11 +85,20 @@ export default function HistoryScreen() {
             <TouchableOpacity
               style={[s.card, open && s.cardOpen]}
               activeOpacity={0.8}
-              onPress={() => setOpenId(open ? null : id)}
+              onPress={() => {
+                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                setOpenId(open ? null : id);
+              }}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: open }}
+              accessibilityLabel={`${fmtDateKo(item.date)} ${item.dayName || '운동'} ${item.totalSets}세트`}
             >
               <View style={s.cardHead}>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.date}>{fmtDateKo(item.date)}</Text>
+                  <Text style={s.date}>
+                    {fmtDateKo(item.date)}
+                    {item.id?.startsWith('local-') ? <Text style={s.pendingTag}>  · 동기화 대기</Text> : null}
+                  </Text>
                   <Text style={s.dayName}>{item.dayName || '운동'}</Text>
                 </View>
                 <View style={s.cardStats}>
@@ -99,7 +117,7 @@ export default function HistoryScreen() {
                   {done.map((x, i) => {
                     const e = exById(x.id);
                     return (
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={0.7}
                         key={`${x.id}-${i}`}
                         style={s.exRow}
                         onPress={() => router.push(`/exercise/${x.id}`)}
@@ -138,6 +156,7 @@ function Summary({ value, label }: { value: string; label: string }) {
 }
 
 const s = StyleSheet.create({
+  pendingTag: { color: colors.muted, fontSize: 11, fontWeight: '400' },
   prLink: { fontSize: 12, color: colors.mid, fontWeight: '600' },
   summaryRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingBottom: 6 },
   summary: {
@@ -149,7 +168,7 @@ const s = StyleSheet.create({
 
   listInner: { paddingHorizontal: 16, paddingBottom: 40, paddingTop: 10 },
   monthLabel: {
-    fontSize: 9.5, fontWeight: '800', color: colors.muted,
+    fontSize: 10, fontWeight: '800', color: colors.muted,
     letterSpacing: 2, marginTop: 14, marginBottom: 10,
   },
   card: {

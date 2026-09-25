@@ -1,7 +1,8 @@
 import { Stack } from 'expo-router';
+import { colors } from '../../src/utils/colors';
 
 export default function ExerciseLayout() {
   return (
-    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#09090A' } }} />
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }} />
   );
 }

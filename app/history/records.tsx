@@ -2,11 +2,12 @@ import { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, FlatList } from 'react-native';
 import { useRouter } from 'expo-router';
 import { colors } from '../../src/utils/colors';
-import { Screen, TopBar, EmptyState } from '../../src/components/ui';
+import { Screen, TopBar, EmptyState, useSafeBack } from '../../src/components/ui';
 import { useAppStore } from '../../src/stores/appStore';
+import { useAuthStore } from '../../src/stores/authStore';
 import { EX, Part, PART_LABEL, PART_ORDER } from '../../src/data/exercises';
-import { personalBest, e1rm, fmtDateKo } from '../../src/utils/stats';
-import { WorkoutLog, SetDetail } from '../../src/types';
+import { personalBest, e1rm, setScore, fmtDateKo, fmtSetDetail } from '../../src/utils/stats';
+import { WorkoutLog, SetDetail, UserStats } from '../../src/types';
 
 interface RecordRow {
   id: string;
@@ -17,25 +18,33 @@ interface RecordRow {
   date: string;
 }
 
-/** 이 기록을 세운 날짜를 역추적 */
-function dateOfBest(logs: WorkoutLog[], exId: string, best: SetDetail): string {
+/** 이 기록을 세운 날짜를 역추적 — 최근 로그 밖의 기록은 서버 요약(stats.pr)의 날짜 */
+function dateOfBest(logs: WorkoutLog[], exId: string, best: SetDetail, stats?: UserStats): string {
   for (const l of logs) {
     const hit = l.exercises.find((x) => x.id === exId);
     if (hit?.best && hit.best.w === best.w && hit.best.r === best.r) return l.date;
   }
+  const stored = stats?.pr?.[exId];
+  if (stored && stored.w === best.w && stored.r === best.r) return stored.date;
   return logs.find((l) => l.exercises.some((x) => x.id === exId))?.date ?? '';
 }
 
 export default function RecordsScreen() {
   const router = useRouter();
-  const { logs } = useAppStore();
+  const goBack = useSafeBack();
+  const logs = useAppStore((s) => s.logs);
+  const stats = useAuthStore((s) => s.user?.stats);
   const [part, setPart] = useState<Part | '전체'>('전체');
 
   const rows = useMemo<RecordRow[]>(() => {
-    const done = new Set(logs.flatMap((l) => l.exercises.map((x) => x.id)));
+    // 최근 로그 + 서버 요약(stats.pr) 양쪽에 있는 종목 — 오래된 PR 도 빠지지 않는다
+    const done = new Set([
+      ...logs.flatMap((l) => l.exercises.map((x) => x.id)),
+      ...Object.keys(stats?.pr ?? {}),
+    ]);
     return EX.filter((e) => done.has(e.id))
       .map((e) => {
-        const best = personalBest(logs, e.id);
+        const best = personalBest(logs, e.id, stats);
         if (!best) return null;
         return {
           id: e.id,
@@ -43,12 +52,13 @@ export default function RecordsScreen() {
           part: e.part,
           best,
           est1rm: Math.round(e1rm(best.w, best.r)),
-          date: dateOfBest(logs, e.id, best),
+          date: dateOfBest(logs, e.id, best, stats),
         };
       })
       .filter((r): r is RecordRow => r !== null)
-      .sort((a, b) => b.est1rm - a.est1rm);
-  }, [logs]);
+      // 무게 종목은 추정 1RM, 맨몸·시간 종목은 반복/초 — 무게 종목이 위로
+      .sort((a, b) => (b.best.w > 0 ? 1 : 0) - (a.best.w > 0 ? 1 : 0) || setScore(b.best) - setScore(a.best));
+  }, [logs, stats]);
 
   const filtered = part === '전체' ? rows : rows.filter((r) => r.part === part);
   const parts = PART_ORDER.filter((p) => rows.some((r) => r.part === p));
@@ -56,9 +66,11 @@ export default function RecordsScreen() {
   if (!rows.length) {
     return (
       <Screen>
-        <TopBar title="개인 기록" onBack={() => router.back()} />
+        <TopBar title="개인 기록" onBack={goBack} />
         <EmptyState
           text={'아직 기록이 없습니다.\n무게와 횟수를 입력해 운동을 완료하면\n종목별 최고 기록이 쌓입니다.'}
+          cta="오늘 운동 시작하기"
+          onCta={() => router.replace('/tabs/home')}
         />
       </Screen>
     );
@@ -66,11 +78,11 @@ export default function RecordsScreen() {
 
   return (
     <Screen>
-      <TopBar title="개인 기록" meta={`${rows.length}종목`} onBack={() => router.back()} />
+      <TopBar title="개인 기록" meta={`${rows.length}종목`} onBack={goBack} />
 
       <View style={s.pillWrap}>
         {(['전체' as const, ...parts]).map((item) => (
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={0.7}
             key={String(item)}
             style={[s.pill, part === item && s.pillOn]}
             onPress={() => setPart(item)}
@@ -107,8 +119,8 @@ export default function RecordsScreen() {
               </Text>
             </View>
             <View style={s.right}>
-              <Text style={s.best}>{item.best.w}kg × {item.best.r}</Text>
-              <Text style={s.est}>추정 1RM {item.est1rm}kg</Text>
+              <Text style={s.best}>{item.best.w > 0 ? `${item.best.w}kg × ${item.best.r}` : fmtSetDetail(item.best)}</Text>
+              <Text style={s.est}>{item.best.w > 0 ? `추정 1RM ${item.est1rm}kg` : '맨몸 · 최고 기록'}</Text>
             </View>
           </TouchableOpacity>
         )}
@@ -127,7 +139,7 @@ const s = StyleSheet.create({
   },
   pill: {
     backgroundColor: colors.panel2, borderRadius: 20,
-    paddingHorizontal: 15, paddingVertical: 8,
+    paddingHorizontal: 15, paddingVertical: 8, minHeight: 40, justifyContent: 'center',
     borderWidth: 1, borderColor: colors.line,
   },
   pillOn: { backgroundColor: colors.ink, borderColor: colors.ink },

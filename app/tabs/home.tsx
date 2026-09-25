@@ -1,10 +1,11 @@
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, Image,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, Image, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors } from '../../src/utils/colors';
 import { useAppStore } from '../../src/stores/appStore';
+import { useAuthStore } from '../../src/stores/authStore';
 import { FEED } from '../../src/data/feed';
 import { exById } from '../../src/data/exercises';
 import ExerciseMedia from '../../src/components/ExerciseMedia';
@@ -14,18 +15,32 @@ const DOW = ['월', '화', '수', '목', '금', '토', '일'];
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { plan, profile, logs, startSession } = useAppStore();
+  const plan = useAppStore((s) => s.plan);
+  const logs = useAppStore((s) => s.logs);
+  const startSession = useAppStore((s) => s.startSession);
+  const hydrating = useAuthStore((s) => s.hydrating);
 
   const today = new Date().toLocaleDateString('ko-KR', {
     month: '2-digit', day: '2-digit', weekday: 'short',
   });
+
+  if (!plan && hydrating) {
+    // 로그인 직후 플랜이 오기 전에 "플랜 없음" 을 보이면 루틴을 골라 기존 플랜을 덮어쓰게 된다
+    return (
+      <SafeAreaView style={s.root} edges={['top']}>
+        <View style={s.empty}>
+          <ActivityIndicator color={colors.muted} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (!plan) {
     return (
       <SafeAreaView style={s.root} edges={['top']}>
         <View style={s.empty}>
           <Text style={s.emptyTxt}>아직 플랜이 없습니다.</Text>
-          <TouchableOpacity style={s.emptyBtn} onPress={() => router.push('/routine')}>
+          <TouchableOpacity activeOpacity={0.7} style={s.emptyBtn} onPress={() => router.push('/routine')}>
             <Text style={s.emptyBtnTxt}>루틴 선택하기</Text>
           </TouchableOpacity>
         </View>
@@ -40,11 +55,12 @@ export default function HomeScreen() {
   const weekSets = totalSets(logs, { weekOnly: true });
   // 이번 주 운동 횟수를 목표 일수와 대비해 보여준다
   const weekDone = streak.filter(Boolean).length;
-  const weekGoal = profile?.days ?? 3;
+  // 목표 일수는 플랜(루틴)의 데이 수 — 프로필의 주 N일과 프리셋 루틴이 다를 수 있다
+  const weekGoal = Math.max(1, plan.days.length);
   const goalPct = Math.min(100, Math.round((weekDone / weekGoal) * 100));
 
   const lastLog = logs[0];
-  const comment = lastLog
+  const comment = lastLog && lastLog.totalSets > 0
     ? `최근 ${lastLog.dayName}에서 ${lastLog.totalSets}세트를 완료했습니다. 오늘은 ${day.name} 차례예요.`
     : `오늘은 ${day.name}입니다. 무게는 12회를 안정적으로 수행 가능한 수준으로 시작하세요.`;
 
@@ -63,7 +79,7 @@ export default function HomeScreen() {
               <Text style={s.heroBadgeTxt}>DAY {dayIdx + 1} / {plan.days.length}</Text>
             </View>
             {plan.routineId && (
-              <TouchableOpacity onPress={() => router.push(`/routine/${plan.routineId}`)}>
+              <TouchableOpacity activeOpacity={0.7} onPress={() => router.push(`/routine/${plan.routineId}`)}>
                 <Text style={s.heroLink}>루틴 보기 ›</Text>
               </TouchableOpacity>
             )}
@@ -81,16 +97,27 @@ export default function HomeScreen() {
             ))}
           </ScrollView>
 
-          <TouchableOpacity style={s.startBtn} onPress={() => startSession(dayIdx)}>
+          <TouchableOpacity activeOpacity={0.7}
+            style={s.startBtn}
+            onPress={() => startSession(dayIdx)}
+            accessibilityRole="button"
+            accessibilityLabel={`${day.name} 운동 시작`}
+          >
             <Text style={s.startBtnTxt}>▶  운동 시작</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Streak */}
-        <View style={s.card}>
+        {/* Streak — 탭하면 운동 기록으로 */}
+        <TouchableOpacity
+          style={s.card}
+          activeOpacity={0.8}
+          onPress={() => router.push('/history')}
+          accessibilityRole="button"
+          accessibilityLabel="이번 주 운동 현황, 운동 기록 보기"
+        >
           <View style={s.cardHead}>
             <Text style={s.sectionLabel}>THIS WEEK</Text>
-            <Text style={s.cardMeta}>{weekSets}세트</Text>
+            <Text style={s.cardMeta}>{weekSets}세트 ›</Text>
           </View>
 
           <View style={s.goalRow}>
@@ -112,11 +139,11 @@ export default function HomeScreen() {
               </View>
             ))}
           </View>
-        </View>
+        </TouchableOpacity>
 
-        {/* Coach */}
+        {/* 오늘의 팁 — 유료 'AI 코치' 와 이름을 겹치지 않는다 */}
         <View style={s.card}>
-          <Text style={s.sectionLabel}>COACH</Text>
+          <Text style={s.sectionLabel}>TODAY</Text>
           <Text style={s.commentTxt}>{comment}</Text>
         </View>
 
@@ -185,7 +212,7 @@ const s = StyleSheet.create({
   heroThumbs: { flexGrow: 0, flexShrink: 0, marginBottom: 16, marginHorizontal: -4 },
   heroThumbsInner: { gap: 8, paddingHorizontal: 4 },
   heroThumb: { width: 72, height: 72 },
-  heroThumbTxt: { fontSize: 9.5, color: colors.muted, marginTop: 5, width: 72, textAlign: 'center' },
+  heroThumbTxt: { fontSize: 10, color: colors.muted, marginTop: 5, width: 72, textAlign: 'center' },
   startBtn: { backgroundColor: colors.ink, borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
   startBtnTxt: { color: colors.bg, fontSize: 15, fontWeight: '700', letterSpacing: 0.3 },
 
@@ -196,7 +223,7 @@ const s = StyleSheet.create({
   cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   cardMeta: { fontSize: 10.5, color: colors.mid, marginBottom: 14 },
   sectionLabel: {
-    fontSize: 9.5, fontWeight: '800', color: colors.muted,
+    fontSize: 10, fontWeight: '800', color: colors.muted,
     letterSpacing: 2, marginBottom: 14,
   },
   goalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 },
@@ -241,7 +268,7 @@ const s = StyleSheet.create({
     borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3,
     borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.12)',
   },
-  gridBadgeTxt: { fontSize: 9.5, color: colors.mid, fontWeight: '600' },
+  gridBadgeTxt: { fontSize: 10, color: colors.mid, fontWeight: '600' },
   gridName: { fontSize: 12.5, fontWeight: '600', color: colors.ink, lineHeight: 17, marginBottom: 3 },
   gridPart: { fontSize: 11, color: colors.muted },
 });

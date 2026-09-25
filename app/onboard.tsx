@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  ActivityIndicator, } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+  ActivityIndicator, KeyboardAvoidingView, Platform,
+} from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors } from '../src/utils/colors';
 import { showAlert } from '../src/utils/alert';
@@ -10,7 +11,8 @@ import { UserProfile } from '../src/types';
 import { useAuthStore } from '../src/stores/authStore';
 import { useAppStore } from '../src/stores/appStore';
 import { saveOnboarding } from '../src/services/authService';
-import { generatePlan, SubscriptionRequired } from '../src/services/aiService';
+import { generatePlan, SubscriptionRequired, QuotaExceeded } from '../src/services/aiService';
+import { validateProfile } from '../src/utils/body';
 import { useEntitlement } from '../src/hooks/useEntitlement';
 import { ProBadge } from '../src/components/ProLock';
 import { planFromRoutine } from '../src/utils/planner';
@@ -26,6 +28,7 @@ const defaultProfile: UserProfile = {
 
 export default function OnboardScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user, patchUser } = useAuthStore();
   const { setProfile, setPlan } = useAppStore();
   const [step, setStep] = useState(0);
@@ -37,6 +40,18 @@ export default function OnboardScreen() {
   }
 
   const canNext = step === 0 ? !!(p.age && p.height && p.weight) : true;
+
+  function next() {
+    if (step === 0) {
+      // 빈 값만 보면 '1.75', '800', '-5' 가 통과해 BMI 235102 같은 값이 화면에 나간다
+      const err = validateProfile(p);
+      if (err) {
+        showAlert('입력 확인', err);
+        return;
+      }
+    }
+    setStep((v) => v + 1);
+  }
 
   // 루틴 추천과 AI 구성은 구독 기능이다.
   // 구독 전에는 추천 배지도 정렬도 걸지 않는다 — 보여 주면 이미 준 것이다.
@@ -73,14 +88,19 @@ export default function OnboardScreen() {
     }
     setLoading('ai');
     try {
-      const plan = await generatePlan(p);
+      const { plan, fallback, reason } = await generatePlan(p);
       await saveOnboarding(user.uid, p, plan);
       setProfile(p);
       setPlan(plan);
       patchUser({ onboardingDone: true, profile: p });
       router.replace('/tabs/home');
+      if (fallback) {
+        // 구독자가 "AI 플랜" 을 받았다고 믿게 두지 않는다 — 운동 탭에서 다시 시도할 수 있다
+        showAlert('자동 구성으로 시작', `${reason ?? 'AI 서버에 연결하지 못했습니다.'} 우선 자동 알고리즘으로 구성했어요. 운동 탭에서 'AI로 다시 구성' 을 누르면 다시 시도합니다.`);
+      }
     } catch (e) {
       if (e instanceof SubscriptionRequired) router.push('/subscribe?f=ai_plan');
+      else if (e instanceof QuotaExceeded) showAlert('오늘 한도 초과', `${e.message} 아래 루틴 중 하나로 시작해주세요.`);
       else showAlert('오류', '플랜 생성에 실패했습니다. 다시 시도해주세요.');
     } finally {
       setLoading(null);
@@ -88,8 +108,14 @@ export default function OnboardScreen() {
   }
 
   return (
-    <SafeAreaView style={s.root}>
-      <View style={s.progRow}>
+    <SafeAreaView style={s.root} edges={['top']}>
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View
+        style={s.progRow}
+        accessibilityRole="progressbar"
+        accessibilityLabel={`온보딩 ${step + 1}단계, 전체 ${TOTAL}단계`}
+        accessibilityValue={{ min: 1, max: TOTAL, now: step + 1 }}
+      >
         {Array.from({ length: TOTAL }).map((_, i) => (
           <View key={i} style={[s.progBar, i <= step && s.progOn]} />
         ))}
@@ -114,28 +140,31 @@ export default function OnboardScreen() {
       </ScrollView>
 
       {step < TOTAL - 1 && (
-        <View style={s.foot}>
+        <View style={[s.foot, { paddingBottom: Math.max(insets.bottom, 18) }]}>
           {step > 0 && (
-            <TouchableOpacity style={s.backBtn} onPress={() => setStep((v) => v - 1)}>
+            <TouchableOpacity activeOpacity={0.7} style={s.backBtn} onPress={() => setStep((v) => v - 1)} accessibilityRole="button">
               <Text style={s.backTxt}>이전</Text>
             </TouchableOpacity>
           )}
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={0.7}
             style={[s.nextBtn, !canNext && s.btnOff]}
             disabled={!canNext}
-            onPress={() => setStep((v) => v + 1)}
+            onPress={next}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canNext }}
           >
             <Text style={s.nextTxt}>다음</Text>
           </TouchableOpacity>
         </View>
       )}
       {step === TOTAL - 1 && (
-        <View style={s.foot}>
-          <TouchableOpacity style={s.backBtn} onPress={() => setStep((v) => v - 1)}>
+        <View style={[s.foot, { paddingBottom: Math.max(insets.bottom, 18) }]}>
+          <TouchableOpacity activeOpacity={0.7} style={s.backBtn} onPress={() => setStep((v) => v - 1)}>
             <Text style={s.backTxt}>이전</Text>
           </TouchableOpacity>
         </View>
       )}
+    </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -198,7 +227,7 @@ function Step3({ p, update }: { p: UserProfile; update: <K extends keyof UserPro
       <Text style={s.label}>주당 운동 일수</Text>
       <View style={s.chipRow}>
         {([2, 3, 4, 5, 6] as const).map((d) => (
-          <TouchableOpacity key={d} style={[s.chip, p.days === d && s.chipOn]} onPress={() => update('days', d)}>
+          <TouchableOpacity activeOpacity={0.7} key={d} style={[s.chip, p.days === d && s.chipOn]} onPress={() => update('days', d)}>
             <Text style={[s.chipTxt, p.days === d && s.chipOnTxt]}>주 {d}일</Text>
           </TouchableOpacity>
         ))}
@@ -258,16 +287,23 @@ function StepRoutine({
       <Text style={s.q}>루틴을 선택하세요</Text>
       <Text style={s.desc}>선택한 루틴이 내 플랜이 됩니다. 나중에 언제든 바꿀 수 있어요.</Text>
 
-      <TouchableOpacity style={[s.aiCard, loading === 'ai' && s.btnOff]} onPress={onAI} disabled={!!loading}>
+      {/* 구독 전엔 잠긴 카드가 화면에서 가장 눈에 띄는 요소가 되지 않도록 고스트 스타일로 낮춘다 */}
+      <TouchableOpacity activeOpacity={0.7}
+        style={[canAI ? s.aiCard : s.aiCardLocked, loading === 'ai' && s.btnOff]}
+        onPress={onAI}
+        disabled={!!loading}
+        accessibilityRole="button"
+        accessibilityLabel={canAI ? 'AI 맞춤 구성' : 'AI 맞춤 구성, 구독 기능'}
+      >
         {loading === 'ai' ? (
-          <ActivityIndicator color={colors.bg} />
+          <ActivityIndicator color={canAI ? colors.bg : colors.ink} />
         ) : (
           <>
             <View style={s.aiHead}>
-              <Text style={s.aiTitle}>AI 맞춤 구성</Text>
-              {!canAI && <View style={s.aiPro}><Text style={s.aiProTxt}>PRO</Text></View>}
+              <Text style={canAI ? s.aiTitle : s.aiTitleLocked}>AI 맞춤 구성</Text>
+              {!canAI && <ProBadge />}
             </View>
-            <Text style={s.aiSub}>
+            <Text style={canAI ? s.aiSub : s.aiSubLocked}>
               {canAI
                 ? '입력한 정보로 종목까지 직접 골라 드립니다'
                 : '구독 기능입니다. 아래 루틴은 지금 바로 무료로 쓸 수 있어요'}
@@ -277,7 +313,7 @@ function StepRoutine({
       </TouchableOpacity>
 
       {!recommendedId && (
-        <TouchableOpacity style={s.recoLock} onPress={onReco} disabled={!!loading}>
+        <TouchableOpacity activeOpacity={0.7} style={s.recoLock} onPress={onReco} disabled={!!loading}>
           <Text style={s.recoLockTxt}>내 조건에 맞는 루틴 추천받기</Text>
           <ProBadge />
         </TouchableOpacity>
@@ -285,7 +321,7 @@ function StepRoutine({
 
       <Text style={s.label}>루틴 라이브러리</Text>
       {list.map((r) => (
-        <TouchableOpacity
+        <TouchableOpacity activeOpacity={0.7}
           key={r.id}
           style={[s.rCard, !!recommendedId && r.id === recommendedId && s.rCardRec, loading === r.id && s.btnOff]}
           onPress={() => onPreset(r.id)}
@@ -315,7 +351,7 @@ function StepRoutine({
 // ─── Shared ─────────────────────────────────────────────────────────────────
 function Opt({ label, sub, on, onPress }: { label: string; sub?: string; on: boolean; onPress: () => void }) {
   return (
-    <TouchableOpacity style={[s.opt, on && s.optOn]} onPress={onPress}>
+    <TouchableOpacity activeOpacity={0.7} style={[s.opt, on && s.optOn]} onPress={onPress}>
       <View style={{ flex: 1 }}>
         <Text style={[s.optTxt, on && s.optTxtOn]}>{label}</Text>
         {sub ? <Text style={s.optSub}>{sub}</Text> : null}
@@ -332,7 +368,7 @@ const s = StyleSheet.create({
   progOn: { backgroundColor: colors.ink },
   scroll: { flex: 1 },
   scrollInner: { padding: 22, paddingBottom: 16 },
-  foot: { flexDirection: 'row', gap: 10, padding: 18, paddingBottom: 34 },
+  foot: { flexDirection: 'row', gap: 10, padding: 18 },
   backBtn: {
     flex: 0, minWidth: 90, borderWidth: 1, borderColor: colors.line2,
     borderRadius: 10, paddingVertical: 15, alignItems: 'center',
@@ -362,7 +398,7 @@ const s = StyleSheet.create({
   optDot: { fontSize: 14, color: colors.muted },
   optDotOn: { color: colors.ink },
   chipRow: { flexDirection: 'row', gap: 7, flexWrap: 'wrap', marginBottom: 4 },
-  chip: { borderWidth: 1, borderColor: colors.line2, borderRadius: 20, paddingVertical: 8, paddingHorizontal: 14 },
+  chip: { borderWidth: 1, borderColor: colors.line2, borderRadius: 20, paddingVertical: 8, paddingHorizontal: 14, minHeight: 40, justifyContent: 'center' },
   chipOn: { backgroundColor: colors.ink, borderColor: colors.ink },
   chipTxt: { fontSize: 13, color: colors.mid },
   chipOnTxt: { color: colors.bg, fontWeight: '600' },
@@ -371,13 +407,14 @@ const s = StyleSheet.create({
     backgroundColor: colors.ink, borderRadius: 16, padding: 18,
     alignItems: 'center', marginTop: 4, minHeight: 78, justifyContent: 'center',
   },
+  aiCardLocked: {
+    backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line2, borderRadius: 16,
+    padding: 18, alignItems: 'center', marginTop: 4, minHeight: 78, justifyContent: 'center',
+  },
+  aiTitleLocked: { fontSize: 15, fontWeight: '700', color: colors.mid },
+  aiSubLocked: { fontSize: 12, color: colors.muted, marginTop: 4, lineHeight: 18 },
   aiHead: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   aiTitle: { fontSize: 16, fontWeight: '800', color: colors.bg },
-  aiPro: {
-    backgroundColor: 'rgba(9,9,10,0.14)', borderRadius: 5,
-    paddingHorizontal: 6, paddingVertical: 2,
-  },
-  aiProTxt: { fontSize: 8.5, fontWeight: '800', color: 'rgba(9,9,10,0.7)', letterSpacing: 0.6 },
   aiSub: { fontSize: 12, color: 'rgba(9,9,10,0.65)', marginTop: 4, lineHeight: 18 },
   recoLock: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8,
@@ -394,7 +431,7 @@ const s = StyleSheet.create({
   rHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   rName: { fontSize: 16, fontWeight: '700', color: colors.ink },
   recBadge: { backgroundColor: colors.panel3, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 },
-  recBadgeTxt: { fontSize: 9.5, fontWeight: '800', color: colors.ink, letterSpacing: 0.5 },
+  recBadgeTxt: { fontSize: 10, fontWeight: '800', color: colors.ink, letterSpacing: 0.5 },
   rSub: { fontSize: 12, color: colors.muted, marginTop: 4 },
   rMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
   rMeta: { fontSize: 11, color: colors.mid },

@@ -9,13 +9,16 @@ import { Screen, TopBar, Body, SectionLabel, PrimaryBtn, EmptyState } from '../.
 import { useAppStore } from '../../src/stores/appStore';
 import { useAuthStore } from '../../src/stores/authStore';
 import { saveProfile } from '../../src/services/authService';
-import { calcBodyStats, effectiveWeight } from '../../src/utils/body';
+import { calcBodyStats, effectiveWeight, validateProfile } from '../../src/utils/body';
 import { UserProfile } from '../../src/types';
 
 export default function ProfileEditScreen() {
   const router = useRouter();
-  const { user, patchUser } = useAuthStore();
-  const { profile, weights, setProfile } = useAppStore();
+  const user = useAuthStore((s) => s.user);
+  const patchUser = useAuthStore((s) => s.patchUser);
+  const profile = useAppStore((s) => s.profile);
+  const weights = useAppStore((s) => s.weights);
+  const setProfile = useAppStore((s) => s.setProfile);
   const [p, setP] = useState<UserProfile | null>(profile);
   const [saving, setSaving] = useState(false);
 
@@ -39,18 +42,27 @@ export default function ProfileEditScreen() {
   const st = calcBodyStats(p, weights);
   const eff = effectiveWeight(p, weights);
   const changed = JSON.stringify(p) !== JSON.stringify(profile);
-  const valid = !!(p.age && p.height && p.weight);
+  const validationError = validateProfile(p);
+  const valid = !validationError;
+
+  function handleBack() {
+    if (!changed) { router.back(); return; }
+    showAlert('변경사항이 있습니다', '저장하지 않고 나갈까요?', [
+      { text: '계속 수정', style: 'cancel' },
+      { text: '저장 없이 나가기', style: 'destructive', onPress: () => router.back() },
+    ]);
+  }
 
   async function handleSave() {
-    if (!user || !p || !valid) return;
+    if (!user || !p) return;
+    if (validationError) { showAlert('입력 확인', validationError); return; }
     setSaving(true);
     try {
       await saveProfile(user.uid, p);
       setProfile(p);
       patchUser({ profile: p });
-      showAlert('저장 완료', '변경한 정보가 반영되었습니다.', [
-        { text: '확인', onPress: () => router.back() },
-      ]);
+      // 저장했으면 바로 돌아간다 — 확인 버튼을 한 번 더 누르게 하지 않는다
+      router.back();
     } catch {
       showAlert('오류', '저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
     } finally {
@@ -60,7 +72,7 @@ export default function ProfileEditScreen() {
 
   return (
     <Screen>
-      <TopBar title="내 정보" meta="PROFILE" onBack={() => router.back()} />
+      <TopBar title="내 정보" meta="PROFILE" onBack={handleBack} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -73,10 +85,11 @@ export default function ProfileEditScreen() {
           </View>
 
           <View style={s.grid3}>
-            <Field label="나이" value={p.age} onChange={(v) => update('age', v)} kb="numeric" />
-            <Field label="키 (cm)" value={p.height} onChange={(v) => update('height', v)} kb="decimal-pad" />
-            <Field label="몸무게 (kg)" value={p.weight} onChange={(v) => update('weight', v)} kb="decimal-pad" />
+            <Field label="나이" value={p.age} onChange={(v) => update('age', v)} kb="numeric" placeholder="25" />
+            <Field label="키 (cm)" value={p.height} onChange={(v) => update('height', v)} kb="decimal-pad" placeholder="175" />
+            <Field label="몸무게 (kg)" value={p.weight} onChange={(v) => update('weight', v)} kb="decimal-pad" placeholder="70" />
           </View>
+          {validationError && changed ? <Text style={s.errTxt}>{validationError}</Text> : null}
 
           {st && (
             <View style={s.calcBox}>
@@ -105,7 +118,7 @@ export default function ProfileEditScreen() {
           <Text style={s.label}>주당 운동 일수</Text>
           <View style={s.chipRow}>
             {([2, 3, 4, 5, 6] as const).map((d) => (
-              <TouchableOpacity key={d} style={[s.chip, p.days === d && s.chipOn]} onPress={() => update('days', d)}>
+              <TouchableOpacity activeOpacity={0.7} key={d} style={[s.chip, p.days === d && s.chipOn]} onPress={() => update('days', d)}>
                 <Text style={[s.chipTxt, p.days === d && s.chipOnTxt]}>주 {d}일</Text>
               </TouchableOpacity>
             ))}
@@ -114,7 +127,7 @@ export default function ProfileEditScreen() {
           <Text style={s.label}>운동 경력</Text>
           <View style={s.chipRow}>
             {([1, 2, 3] as const).map((lv) => (
-              <TouchableOpacity key={lv} style={[s.chip, p.level === lv && s.chipOn]} onPress={() => update('level', lv)}>
+              <TouchableOpacity activeOpacity={0.7} key={lv} style={[s.chip, p.level === lv && s.chipOn]} onPress={() => update('level', lv)}>
                 <Text style={[s.chipTxt, p.level === lv && s.chipOnTxt]}>
                   {{ 1: '입문', 2: '중급', 3: '상급' }[lv]}
                 </Text>
@@ -128,7 +141,7 @@ export default function ProfileEditScreen() {
               ['convenience', '편의점'], ['self', '자취 요리'],
               ['family', '집밥'], ['out', '외식'],
             ] as const).map(([k, label]) => (
-              <TouchableOpacity key={k} style={[s.chip, p.food === k && s.chipOn]} onPress={() => update('food', k)}>
+              <TouchableOpacity activeOpacity={0.7} key={k} style={[s.chip, p.food === k && s.chipOn]} onPress={() => update('food', k)}>
                 <Text style={[s.chipTxt, p.food === k && s.chipOnTxt]}>{label}</Text>
               </TouchableOpacity>
             ))}
@@ -160,8 +173,8 @@ export default function ProfileEditScreen() {
 }
 
 function Field({
-  label, value, onChange, kb,
-}: { label: string; value: string; onChange: (v: string) => void; kb: 'numeric' | 'decimal-pad' }) {
+  label, value, onChange, kb, placeholder,
+}: { label: string; value: string; onChange: (v: string) => void; kb: 'numeric' | 'decimal-pad'; placeholder?: string }) {
   return (
     <View style={{ flex: 1 }}>
       <Text style={s.label}>{label}</Text>
@@ -170,7 +183,10 @@ function Field({
         value={value}
         onChangeText={onChange}
         keyboardType={kb}
+        placeholder={placeholder}
         placeholderTextColor={colors.muted}
+        selectTextOnFocus
+        accessibilityLabel={label}
       />
     </View>
   );
@@ -178,7 +194,7 @@ function Field({
 
 function Opt({ label, sub, on, onPress }: { label: string; sub?: string; on: boolean; onPress: () => void }) {
   return (
-    <TouchableOpacity style={[s.opt, on && s.optOn]} onPress={onPress}>
+    <TouchableOpacity activeOpacity={0.7} style={[s.opt, on && s.optOn]} onPress={onPress}>
       <View style={{ flex: 1 }}>
         <Text style={[s.optTxt, on && s.optTxtOn]}>{label}</Text>
         {sub ? <Text style={s.optSub}>{sub}</Text> : null}
@@ -189,6 +205,8 @@ function Opt({ label, sub, on, onPress }: { label: string; sub?: string; on: boo
 }
 
 const s = StyleSheet.create({
+  errTxt: { color: colors.wrong, fontSize: 12, marginTop: 8 },
+
   label: { fontSize: 12, color: colors.muted, marginTop: 14, marginBottom: 6 },
   input: {
     backgroundColor: colors.panel2, borderWidth: 1, borderColor: colors.line2,
@@ -209,7 +227,7 @@ const s = StyleSheet.create({
   chipRow: { flexDirection: 'row', gap: 7, flexWrap: 'wrap' },
   chip: {
     borderWidth: 1, borderColor: colors.line2, borderRadius: 20,
-    paddingVertical: 8, paddingHorizontal: 14,
+    paddingVertical: 8, paddingHorizontal: 14, minHeight: 40, justifyContent: 'center',
   },
   chipOn: { backgroundColor: colors.ink, borderColor: colors.ink },
   chipTxt: { fontSize: 13, color: colors.mid },

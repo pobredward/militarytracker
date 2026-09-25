@@ -1,16 +1,20 @@
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors } from '../../../src/utils/colors';
-import { Screen, TopBar, Body, SectionLabel, PrimaryBtn, EmptyState, Notice } from '../../../src/components/ui';
+import { Screen, TopBar, Body, SectionLabel, PrimaryBtn, EmptyState, Notice, useSafeBack } from '../../../src/components/ui';
 import ExerciseMedia from '../../../src/components/ExerciseMedia';
 import { routineById, routineDay, routineExercises } from '../../../src/data/routines';
 import { EQUIP_LABEL, LEVEL_LABEL, PART_LABEL } from '../../../src/data/exercises';
 import { useAppStore } from '../../../src/stores/appStore';
+import { showAlert } from '../../../src/utils/alert';
 
 export default function RoutineDayScreen() {
   const { routineId, dayId } = useLocalSearchParams<{ routineId: string; dayId: string }>();
   const router = useRouter();
-  const { plan, startSession } = useAppStore();
+  const goBack = useSafeBack();
+  const plan = useAppStore((s) => s.plan);
+  const session = useAppStore((s) => s.session);
+  const startSession = useAppStore((s) => s.startSession);
 
   const routine = routineById(String(routineId));
   const day = routineDay(String(routineId), String(dayId));
@@ -19,7 +23,7 @@ export default function RoutineDayScreen() {
   if (!routine || !day) {
     return (
       <Screen>
-        <TopBar title="데이" onBack={() => router.back()} />
+        <TopBar title="데이" onBack={goBack} />
         <EmptyState text="데이를 찾을 수 없습니다." />
       </Screen>
     );
@@ -31,10 +35,12 @@ export default function RoutineDayScreen() {
     : -1;
 
   const totalSets = list.reduce((a, e) => a + e.s, 0);
+  // 세트당 수행 ~40초 + 종목별 권장 휴식 — 휴식을 빼고 계산하면 120초 휴식 종목에서 크게 빗나간다
+  const estMin = Math.round(list.reduce((a, e) => a + e.s * (e.rest + 40), 0) / 60);
 
   return (
     <Screen>
-      <TopBar title={day.name} meta={routine.short} onBack={() => router.back()} />
+      <TopBar title={day.name} meta={routine.short} onBack={goBack} />
       <Body>
         <Text style={s.focus}>{day.focus}</Text>
         <Text style={s.desc}>{day.desc}</Text>
@@ -42,13 +48,20 @@ export default function RoutineDayScreen() {
         <View style={s.statRow}>
           <Stat value={`${list.length}`} label="종목" />
           <Stat value={`${totalSets}`} label="총 세트" />
-          <Stat value={`${Math.round(totalSets * 2.5)}분`} label="예상 시간" />
+          <Stat value={`${estMin}분`} label="예상 시간" />
         </View>
 
         {planDayIdx >= 0 && (
           <PrimaryBtn
             label="▶  이 데이 운동 시작"
             onPress={() => {
+              if (session) {
+                // 진행 중인 세션을 덮어쓰면 입력하던 세트가 전부 사라진다
+                showAlert('진행 중인 운동이 있습니다', '홈에서 진행 중인 운동을 마치거나 종료한 뒤 시작할 수 있습니다.', [
+                  { text: '확인', onPress: () => router.replace('/tabs/home') },
+                ]);
+                return;
+              }
               if (startSession(planDayIdx)) router.replace('/tabs/home');
             }}
             style={{ marginBottom: 14 }}
@@ -118,14 +131,14 @@ const s = StyleSheet.create({
   },
   exThumb: { width: 64, height: 64 },
   exInfo: { flex: 1 },
-  exOrder: { fontSize: 9.5, fontWeight: '800', color: colors.muted, letterSpacing: 1 },
+  exOrder: { fontSize: 10, fontWeight: '800', color: colors.muted, letterSpacing: 1 },
   exName: { fontSize: 15, fontWeight: '700', color: colors.ink, marginTop: 2 },
   exMeta: { fontSize: 11, color: colors.muted, marginTop: 2 },
   tagRow: { flexDirection: 'row', gap: 4, marginTop: 6, flexWrap: 'wrap' },
   tag: { backgroundColor: colors.panel3, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 },
-  tagTxt: { fontSize: 9, color: colors.muted, fontWeight: '600' },
+  tagTxt: { fontSize: 10, color: colors.muted, fontWeight: '600' },
   exSets: { alignItems: 'center', minWidth: 44 },
   exSetsNum: { fontSize: 19, fontWeight: '800', color: colors.ink, lineHeight: 23 },
-  exSetsSub: { fontSize: 9, color: colors.muted, letterSpacing: 0.5 },
+  exSetsSub: { fontSize: 10, color: colors.muted, letterSpacing: 0.5 },
   exRep: { fontSize: 10.5, color: colors.mid, marginTop: 2 },
 });
