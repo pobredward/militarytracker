@@ -91,8 +91,8 @@ export const PRO_NAME = 'MILITARYTRACKER PRO';
 // 회원가입의 동의 절차도 같은 페이지를 가리킨다. 페이지는 public/ 의 정적 HTML 로
 // Firebase Hosting 에 함께 배포된다.
 export const LEGAL = {
-  terms: 'https://military-tracker-96bdd.web.app/terms.html',
-  privacy: 'https://military-tracker-96bdd.web.app/privacy.html',
+  terms: 'https://military-tracker-96bdd.web.app/terms',
+  privacy: 'https://military-tracker-96bdd.web.app/privacy',
   /** 문의·지원 — 스토어 양식의 지원 URL/이메일과 같은 값으로 둘 것 */
   support: 'mailto:smiscamp@gmail.com',
 } as const;
