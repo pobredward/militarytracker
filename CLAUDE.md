@@ -8,6 +8,9 @@ Expo SDK 57 · React Native 0.86 · expo-router · TypeScript(strict) · Zustand
 npx tsc --noEmit                  # 앱
 cd functions && npm run build     # Cloud Functions
 npx expo export --platform web    # 번들 스모크 테스트
+npm run deploy:rules              # firestore + storage 규칙, 인덱스
+npm run deploy:functions
+npm run deploy:hosting            # 웹 export + hosting
 ```
 
 ## git push (Claude 세션용)
@@ -49,11 +52,18 @@ npm run media:upload -- <부위>         # 인코딩(1080, CRF 23) · 업로드 
 - **구독 경계선은 `src/config/entitlements.ts` 의 `PRO_FEATURES` 한 곳**에서 정한다.
   바꿀 때 `functions/src/entitlement.ts` 의 `Feature` 키도 같이 맞춘다.
   판정 로직도 `src/utils/subscription.ts` 와 `functions/src/entitlement.ts` 두 벌이다.
-- **`users/{uid}.sub` 는 Cloud Functions 만 쓴다.** 보안 규칙이 클라이언트 쓰기를 막고,
-  AI 콜러블은 `requirePro` 를 먼저 통과해야 한다. 화면 잠금은 보조 수단일 뿐이다.
-- **`functions/src/subscription.ts` 의 `onCall` 은 `region` 을 명시**해야 한다.
-  `index.ts` 의 `setGlobalOptions` 는 import 된 모듈 본문보다 늦게 실행된다.
+- **`users/{uid}.sub`·`usage`·`role` 은 Cloud Functions 만 쓴다.** 규칙은 이 필드의 추가·수정·**삭제**를
+  전부 막는다(`diff().affectedKeys()`). `!('sub' in request.resource.data)` 식 검사는 `deleteField()` 를
+  통과시키므로 쓰지 말 것. `users` 문서 삭제도 클라이언트에 없다 — 지우고 다시 만들면 같은 우회가 된다.
+  AI 콜러블은 `requirePro` → `consumeQuota` 순서를 지킨다. 화면 잠금은 보조 수단일 뿐이다.
+- **`functions/src/index.ts` 에서 `setGlobalOptions` 는 `export … from './subscription'` 보다 위에** 있어야
+  sub*/accountDelete 도 리전·maxInstances 를 받는다(CommonJS `require` 는 소스 순서대로 실행된다).
+  `subscription.ts` 는 순서에 기대지 않도록 `region`/`maxInstances` 를 따로 명시해 두었다.
 - 배포는 **규칙 먼저, 함수 나중**. 순서를 바꾸면 그 사이에 클라이언트가 `sub` 를 쓸 수 있다.
+- **Firebase 웹 설정은 `src/config/firebasePublic.ts` 에 커밋돼 있다.** 공개 값이다. `.env` 는 gitignore 라
+  EAS 빌드에 실리지 않고, Expo 대시보드 환경변수도 비어 있어 프로덕션 빌드가 죽었었다.
+- **`firebase.json` hosting `ignore` 에 `**/node_modules/**` 를 넣지 말 것.** Expo 웹 export 는 벡터 아이콘 폰트를
+  `dist/assets/node_modules/...` 에 두는데 그 패턴에 걸려 배포에서 빠지고 탭 아이콘이 전부 깨진다.
 - **secret 버전은 배포 시점에 함수에 고정된다.** 최신 버전을 쓸 거라고 가정하지 말 것.
   `functions:secrets:destroy KEY@N` 을 `--force` 없이 먼저 돌려 어떤 함수가 그 버전을
   쓰는지 경고를 읽고, 사용 중이면 함수를 먼저 재배포해 새 버전에 묶은 뒤 지운다.

@@ -2,14 +2,15 @@
  * 구독 권한 — 서버 판정.
  *
  * 앱의 잠금 UI 는 우회할 수 있으므로 유료 기능의 실제 차단은 여기서 한다.
- * users/{uid}.sub 는 이 파일(Admin SDK)만 쓴다. 보안 규칙이 클라이언트의 쓰기를 막는다.
+ * users/{uid}.sub 는 Cloud Functions(Admin SDK)만 쓴다 — 이 파일의 writeSub 와
+ * subscription.ts 의 프로모 트랜잭션. 보안 규칙이 클라이언트의 수정·삭제를 모두 막는다.
  *
  * 판정 규칙 사본: src/utils/subscription.ts (isProSub). 고칠 때 둘 다 고칠 것.
  * Feature 키 사본: src/config/entitlements.ts
  */
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
-import { HttpsError } from 'firebase-functions/v2/https';
+import { HttpsError, CallableRequest } from 'firebase-functions/v2/https';
 
 if (!getApps().length) initializeApp();
 export const db = getFirestore();
@@ -37,6 +38,9 @@ export interface Subscription {
   updatedAt: string;
 }
 
+/** 형식이 깨진 expiresAt 에 쓰는 "이미 만료" 값 */
+const EXPIRED_AT = '1970-01-01T00:00:00.000Z';
+
 export const FREE_SUB: Subscription = {
   tier: 'free',
   status: 'none',
@@ -58,10 +62,16 @@ export function normalizeSub(raw: unknown): Subscription {
     d.source === 'ios' || d.source === 'android' || d.source === 'promo' || d.source === 'admin'
       ? d.source
       : 'none';
+  // expiresAt 이 문자열이 아닌 값(Timestamp, number)으로 들어오면 "만료 없음" 이 아니라
+  // "만료됨" 으로 본다 — 콘솔에서 잘못 넣은 값이 영구 PRO 가 되면 안 된다.
+  const expiresAt =
+    d.expiresAt === null || d.expiresAt === undefined ? null
+    : typeof d.expiresAt === 'string' ? d.expiresAt
+    : EXPIRED_AT;
   return {
     tier: d.tier === 'pro' ? 'pro' : 'free',
     status,
-    expiresAt: typeof d.expiresAt === 'string' ? d.expiresAt : null,
+    expiresAt,
     source,
     productId: typeof d.productId === 'string' ? d.productId : null,
     trialUsed: d.trialUsed === true,
@@ -83,11 +93,23 @@ export interface Account {
   pro: boolean;
 }
 
-export async function loadAccount(uid: string): Promise<Account> {
+/** 커스텀 클레임 admin — 보안 규칙(isAdmin)과 같은 기준으로 본다 */
+export const hasAdminClaim = (req: CallableRequest): boolean => req.auth?.token?.admin === true;
+
+export function requireAuth(req: CallableRequest): string {
+  if (!req.auth?.uid) throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
+  return req.auth.uid;
+}
+
+/**
+ * 계정 상태. 관리자 판정은 보안 규칙과 동일하게
+ * "커스텀 클레임 admin==true 또는 users/{uid}.role=='admin'" 이다.
+ */
+export async function loadAccount(uid: string, adminClaim = false): Promise<Account> {
   const snap = await db.collection('users').doc(uid).get();
   const data = snap.exists ? snap.data() : undefined;
   const sub = normalizeSub(data?.sub);
-  const isAdmin = data?.role === 'admin';
+  const isAdmin = adminClaim || data?.role === 'admin';
   return { sub, isAdmin, pro: isAdmin || isProSub(sub) };
 }
 
@@ -95,9 +117,10 @@ export async function loadAccount(uid: string): Promise<Account> {
  * 유료 기능 진입 관문. 권한이 없으면 permission-denied 로 끊는다.
  * 앱은 이 코드를 보고 구독 화면을 연다.
  */
-export async function requirePro(uid: string, feature: Feature): Promise<Account> {
-  const acc = await loadAccount(uid);
-  if (acc.pro) return acc;
+export async function requirePro(req: CallableRequest, feature: Feature): Promise<Account & { uid: string }> {
+  const uid = requireAuth(req);
+  const acc = await loadAccount(uid, hasAdminClaim(req));
+  if (acc.pro) return { ...acc, uid };
   throw new HttpsError(
     'permission-denied',
     `${FEATURE_LABEL[feature]}은 구독 기능입니다.`,

@@ -91,7 +91,10 @@ functions/              Cloud Functions (AI 프록시)
 
 - 본인 데이터만 읽고 쓴다 (`users` / `plans` / `workoutLogs` / `weights`)
 - `role == 'admin'` 이거나 커스텀 클레임 `admin: true` 인 계정은 **전체 허용**
-- 본인이 자기 `role` 을 바꾸는 것은 차단
+- `users.role / sub / usage` 는 서버 전용 — 클라이언트는 추가·수정·삭제 모두 불가 (`diff().affectedKeys()`)
+- `users` 문서 삭제는 클라이언트에 없다 — 계정 삭제는 `accountDelete` 콜러블이 한다
+- 문서 필드는 타입·크기 화이트리스트로 검증한다 (`validLog` / `validWeight` / `validProfile`)
+- 정의되지 않은 컬렉션은 관리자만
 
 ```bash
 npm run deploy:rules
@@ -108,7 +111,9 @@ node -e "require('firebase-admin').initializeApp();require('firebase-admin').aut
 
 ### Cloud Functions (AI 프록시)
 
-`aiPlan` · `aiDiet` · `aiCoach` 세 개의 callable 함수. 모두 로그인 필수.
+AI: `aiPlan` · `aiDiet` · `aiCoach` — 구독(`requirePro`) + 사용 한도(플랜·식단 일 5회, 코치 월 100회, 트랜잭션 선점) 를 서버가 강제한다.
+구독·계정: `subStatus` · `subStartTrial`(이메일 인증 필수) · `subRedeemPromo`(하루 10회 시도 제한) · `subGrant`(관리자) · `subApplyReceipt`(미구현) · `accountDelete`.
+프로모 코드는 `promoCodes/{CODE}` 문서로 콘솔에서 만든다 — `{ days, maxUses, uses: 0, active: true, validUntil? }`, CODE 는 대문자·숫자·하이픈 6~40자.
 
 ```bash
 cd functions && npm install && cd ..

@@ -1,21 +1,43 @@
 /**
- * AI 코치 사용 한도.
+ * AI 사용 한도.
  *
- * 왜 필요한가: 코치 대화는 호출당 원가가 붙는데 구독료는 정액이다.
- * 무제한으로 두면 극소수 헤비 유저가 구독 매출을 전부 상쇄한다.
+ * 왜 필요한가: AI 호출은 호출당 원가가 붙는데 구독료는 정액이다.
+ * 무제한으로 두면 극소수 헤비 유저(또는 봇)가 구독 매출을 전부 상쇄한다.
  * (월 구독 ₩4,900 → 수수료 제하면 약 ₩4,165. 코치 500회면 원가가 그걸 넘는다.)
  *
  * 한도는 반드시 서버에서 센다. 앱에 남은 횟수를 내려 주긴 하지만
  * 그건 표시용이고, 실제 차단은 여기서 한다.
- * users/{uid}.coachUsage 는 이 파일만 쓴다 — 보안 규칙이 클라이언트 쓰기를 막는다.
+ *
+ * 저장 위치: users/{uid}.usage.{kind} = { period, count }
+ * 이 필드는 Cloud Functions 만 쓴다 — 보안 규칙이 클라이언트의 수정·삭제를 막는다.
+ *
+ * 왜 트랜잭션인가: "읽고 → AI 호출 → 쓰기" 로 하면 병렬 호출이 전부 한도를 통과한다.
+ * 그래서 호출 *전에* 트랜잭션으로 자리를 선점하고, AI 가 실패하면 되돌린다.
  */
 import { HttpsError } from 'firebase-functions/v2/https';
 import { db } from './entitlement';
 
-/** 구독에 포함된 월 코치 대화 횟수 */
-export const COACH_MONTHLY_LIMIT = 100;
+export type QuotaKind = 'coach' | 'plan' | 'diet';
 
-export interface CoachQuota {
+interface QuotaRule {
+  limit: number;
+  /** month = 한국 시간 기준 달, day = 한국 시간 기준 날 */
+  period: 'month' | 'day';
+  /** 앱이 판별하는 details.reason — 코치는 기존 값을 유지한다 */
+  reason: string;
+  label: string;
+}
+
+export const QUOTA: Record<QuotaKind, QuotaRule> = {
+  coach: { limit: 100, period: 'month', reason: 'coach_quota_exceeded', label: '이번 달 코치 대화' },
+  plan: { limit: 5, period: 'day', reason: 'plan_quota_exceeded', label: '오늘의 AI 플랜 생성' },
+  diet: { limit: 5, period: 'day', reason: 'diet_quota_exceeded', label: '오늘의 AI 식단 생성' },
+};
+
+/** 앱과 공유하는 값 — 코치 화면이 남은 횟수를 표시한다 */
+export const COACH_MONTHLY_LIMIT = QUOTA.coach.limit;
+
+export interface Quota {
   used: number;
   limit: number;
   remaining: number;
@@ -24,12 +46,13 @@ export interface CoachQuota {
 }
 
 /**
- * 한국 시간 기준 YYYY-MM.
+ * 한국 시간 기준 YYYY-MM 또는 YYYY-MM-DD.
  * UTC 로 계산하면 매월 1일 오전 9시에 초기화돼 유저가 이상하게 느낀다.
  */
-function periodKey(now = new Date()): string {
+export function periodKey(period: 'month' | 'day', now = new Date()): string {
   const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}`;
+  const ym = `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}`;
+  return period === 'month' ? ym : `${ym}-${String(kst.getUTCDate()).padStart(2, '0')}`;
 }
 
 interface StoredUsage {
@@ -37,41 +60,57 @@ interface StoredUsage {
   count?: number;
 }
 
-/**
- * 호출 전에 확인한다. 한도를 넘었으면 resource-exhausted 로 끊는다.
- * 앱은 이 코드를 보고 충전 안내를 띄운다.
- */
-export async function checkCoachQuota(uid: string, isAdmin: boolean): Promise<CoachQuota> {
-  if (isAdmin) {
-    return { used: 0, limit: COACH_MONTHLY_LIMIT, remaining: COACH_MONTHLY_LIMIT, unlimited: true };
-  }
-
-  const snap = await db.collection('users').doc(uid).get();
-  const raw = (snap.data()?.coachUsage ?? {}) as StoredUsage;
-  // 달이 바뀌면 저장된 값은 무시한다 (따로 초기화 작업이 필요 없다)
-  const used = raw.period === periodKey() ? Math.max(0, Number(raw.count) || 0) : 0;
-
-  if (used >= COACH_MONTHLY_LIMIT) {
-    throw new HttpsError(
-      'resource-exhausted',
-      `이번 달 코치 대화 ${COACH_MONTHLY_LIMIT}회를 모두 사용했습니다.`,
-      { reason: 'coach_quota_exceeded', limit: COACH_MONTHLY_LIMIT, used }
-    );
-  }
-  return { used, limit: COACH_MONTHLY_LIMIT, remaining: COACH_MONTHLY_LIMIT - used };
+function readUsage(data: FirebaseFirestore.DocumentData | undefined, kind: QuotaKind): number {
+  const usage = (data?.usage ?? {}) as Record<string, StoredUsage>;
+  // 구버전 문서는 coachUsage 에 있었다
+  const raw: StoredUsage = usage[kind] ?? (kind === 'coach' ? (data?.coachUsage ?? {}) : {});
+  const rule = QUOTA[kind];
+  // 기간이 바뀌면 저장된 값은 무시한다 (따로 초기화 작업이 필요 없다)
+  return raw.period === periodKey(rule.period) ? Math.max(0, Number(raw.count) || 0) : 0;
 }
 
-/**
- * AI 응답이 실제로 온 뒤에만 차감한다 — 연결 실패로 횟수가 깎이면 안 된다.
- * 동시 호출 시 한두 번 덜 세질 수 있으나, 월 100회 한도에서는 무시할 수준이다.
- */
-export async function recordCoachUse(uid: string, quota: CoachQuota): Promise<CoachQuota> {
-  if (quota.unlimited) return quota;
+const unlimited = (kind: QuotaKind): Quota => ({
+  used: 0, limit: QUOTA[kind].limit, remaining: QUOTA[kind].limit, unlimited: true,
+});
 
-  const count = quota.used + 1;
-  await db.collection('users').doc(uid).set(
-    { coachUsage: { period: periodKey(), count } },
-    { merge: true }
-  );
-  return { used: count, limit: quota.limit, remaining: Math.max(0, quota.limit - count) };
+/**
+ * AI 를 부르기 *전에* 자리를 선점한다. 한도를 넘었으면 resource-exhausted 로 끊는다.
+ * 트랜잭션이라 동시에 100개를 보내도 100번째 이후는 전부 막힌다.
+ */
+export async function consumeQuota(uid: string, kind: QuotaKind, isAdmin: boolean): Promise<Quota> {
+  if (isAdmin) return unlimited(kind);
+  const rule = QUOTA[kind];
+  const ref = db.collection('users').doc(uid);
+
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const used = readUsage(snap.data(), kind);
+    if (used >= rule.limit) {
+      throw new HttpsError(
+        'resource-exhausted',
+        `${rule.label} ${rule.limit}회를 모두 사용했습니다.`,
+        { reason: rule.reason, limit: rule.limit, used }
+      );
+    }
+    const count = used + 1;
+    tx.set(ref, { usage: { [kind]: { period: periodKey(rule.period), count } } }, { merge: true });
+    return { used: count, limit: rule.limit, remaining: rule.limit - count };
+  });
+}
+
+/** AI 호출이 실패했을 때 선점한 자리를 돌려준다 — 연결 실패로 횟수가 깎이면 안 된다 */
+export async function refundQuota(uid: string, kind: QuotaKind, quota: Quota): Promise<void> {
+  if (quota.unlimited) return;
+  const rule = QUOTA[kind];
+  const ref = db.collection('users').doc(uid);
+  try {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const used = readUsage(snap.data(), kind);
+      if (used <= 0) return;
+      tx.set(ref, { usage: { [kind]: { period: periodKey(rule.period), count: used - 1 } } }, { merge: true });
+    });
+  } catch {
+    // 환불 실패는 한도 1회 손해일 뿐 — 호출자에게 던지지 않는다
+  }
 }

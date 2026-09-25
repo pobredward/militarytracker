@@ -1,7 +1,14 @@
 rules_version = '2';
 
 // MilitaryTracker — Firestore 보안 규칙
-// 원칙: 본인 데이터만 읽고 쓴다. role == 'admin' 계정은 전체 허용.
+// 원칙: 본인 데이터만 읽고 쓴다. role == 'admin' 계정(또는 admin 클레임)은 전체 허용.
+//
+// 서버 전용 필드(users.sub / users.usage / users.coachUsage / users.role)는
+// 클라이언트가 "수정" 도 "삭제" 도 할 수 없다. update 의 request.resource.data 는
+// 쓰기 *후* 문서라 `!('sub' in request.resource.data)` 식 검사는 deleteField() 를
+// 통과시킨다 — 그래서 diff().affectedKeys() 로 잠근다.
+// users 문서 삭제도 클라이언트에겐 없다(지우고 다시 만들면 같은 우회가 된다).
+// 계정 삭제는 accountDelete 콜러블(Admin SDK)이 한다.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -40,25 +47,50 @@ service cloud.firestore {
       return signedIn() && request.resource.data.userId == uid();
     }
 
-    // role 필드는 본인이 바꿀 수 없다 (권한 상승 차단)
-    function roleUnchanged() {
-      return !('role' in request.resource.data) ||
-             request.resource.data.role == resource.data.role;
+    // 서버 전용 필드는 추가·수정·삭제 어느 것도 클라이언트가 못 한다
+    function serverFieldsUntouched() {
+      return !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['role', 'sub', 'usage', 'coachUsage']);
     }
 
-    // sub(구독) 필드도 본인이 바꿀 수 없다.
-    // Cloud Functions 는 Admin SDK 라 이 규칙을 통과하지 않는다 —
-    // 즉 앱을 뜯어 고쳐도 스스로 PRO 가 될 수 없다.
-    function subUnchanged() {
-      return !('sub' in request.resource.data) ||
-             (('sub' in resource.data) && request.resource.data.sub == resource.data.sub);
+    function isDate(v) {
+      return v is string && v.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}');
     }
 
-    // 코치 사용량도 서버만 쓴다. 클라이언트가 고칠 수 있으면 한도가 무의미하다.
-    function coachUsageUnchanged() {
-      return !('coachUsage' in request.resource.data) ||
-             (('coachUsage' in resource.data) &&
-              request.resource.data.coachUsage == resource.data.coachUsage);
+    function isIso(v) {
+      return v is string && v.size() >= 20 && v.size() <= 40;
+    }
+
+    // 온보딩 프로필 — 화면 입력 그대로의 작은 문자열·숫자만
+    function validProfile(p) {
+      return p is map
+        && p.keys().hasOnly(['sex', 'age', 'height', 'weight', 'goal', 'env', 'days', 'level', 'food', 'allergy'])
+        && p.sex in ['male', 'female']
+        && p.age is string && p.age.size() <= 4
+        && p.height is string && p.height.size() <= 6
+        && p.weight is string && p.weight.size() <= 6
+        && p.goal in ['muscle', 'cut', 'habit']
+        && p.env in ['gym', 'home']
+        && p.days is int && p.days >= 2 && p.days <= 6
+        && p.level is int && p.level >= 1 && p.level <= 3
+        && p.food in ['convenience', 'self', 'family', 'out']
+        && p.allergy is string && p.allergy.size() <= 200;
+    }
+
+    // users 문서의 허용 키. update 의 request.resource.data 는 쓰기 후 문서 전체라
+    // 서버 전용 키(sub/usage/coachUsage)도 목록에 있어야 한다 — 그것들의 변경은
+    // serverFieldsUntouched() 가 따로 막는다.
+    function validUserWrite(d) {
+      return d.keys().hasOnly([
+        'email', 'displayName', 'photoURL', 'authProvider', 'role', 'onboardingDone',
+        'profile', 'createdAt', 'lastLoginAt', 'stats', 'sub', 'usage', 'coachUsage'
+      ])
+        && (!('displayName' in d) || d.displayName == null || (d.displayName is string && d.displayName.size() <= 40))
+        && (!('email' in d) || d.email == null || (d.email is string && d.email.size() <= 254))
+        && (!('onboardingDone' in d) || d.onboardingDone is bool)
+        && (!('profile' in d) || d.profile == null || validProfile(d.profile))
+        // 개인 기록 요약 — 종목 수만큼의 작은 맵
+        && (!('stats' in d) || (d.stats is map && d.stats.keys().size() <= 4));
     }
 
     // ── users ─────────────────────────────────────────────────────────────
@@ -66,43 +98,78 @@ service cloud.firestore {
       allow get: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
 
-      // 가입 시 본인 문서 생성 — 스스로 admin 이나 구독을 부여할 수 없다
+      // 가입 시 본인 문서 생성 — 스스로 admin 이나 구독·사용량을 부여할 수 없다
       allow create: if (isOwner(userId)
                         && request.resource.data.role == 'user'
                         && !('sub' in request.resource.data)
-                        && !('coachUsage' in request.resource.data)) || isAdmin();
-      allow update: if (isOwner(userId) && roleUnchanged() && subUnchanged()
-                        && coachUsageUnchanged()) || isAdmin();
-      allow delete: if isOwner(userId) || isAdmin();
+                        && !('usage' in request.resource.data)
+                        && !('coachUsage' in request.resource.data)
+                        && validUserWrite(request.resource.data)) || isAdmin();
+      allow update: if (isOwner(userId)
+                        && serverFieldsUntouched()
+                        && validUserWrite(request.resource.data)) || isAdmin();
+      // 삭제는 accountDelete 콜러블(서버)만
+      allow delete: if isAdmin();
     }
 
     // ── plans/{uid} ───────────────────────────────────────────────────────
+    function validPlan(d) {
+      return d.keys().hasOnly(['routineId', 'days', 'planSrc', 'planReason', 'updatedAt'])
+        && d.days is list && d.days.size() >= 1 && d.days.size() <= 7
+        && d.planSrc in ['AI', 'LOCAL', 'PRESET']
+        && d.planReason is string && d.planReason.size() <= 300;
+    }
+
     match /plans/{userId} {
-      allow read, write: if isOwner(userId) || isAdmin();
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update: if (isOwner(userId) && validPlan(request.resource.data)) || isAdmin();
+      allow delete: if isAdmin();
     }
 
     // ── workoutLogs ───────────────────────────────────────────────────────
+    function validLog(d) {
+      return d.keys().hasOnly([
+        'userId', 'date', 'dayIdx', 'dayName', 'exercises', 'totalSets', 'totalVolume', 'durationSec', 'createdAt'
+      ])
+        && isDate(d.date)
+        && d.dayIdx is int
+        && d.dayName is string && d.dayName.size() <= 40
+        && d.exercises is list && d.exercises.size() >= 1 && d.exercises.size() <= 30
+        && d.totalSets is int && d.totalSets >= 0 && d.totalSets <= 500
+        && d.totalVolume is number && d.totalVolume >= 0
+        && d.durationSec is int && d.durationSec >= 0
+        && isIso(d.createdAt);
+    }
+
     match /workoutLogs/{logId} {
       // list 는 where('userId','==',uid) 로 필터된 쿼리만 통과한다
-      allow read: if isAdmin() || ownsExisting();
-      allow create: if isAdmin() || ownsIncoming();
-      allow update: if (ownsExisting() && ownsIncoming()) || isAdmin();
-      allow delete: if isAdmin() || ownsExisting();
+      allow read: if ownsExisting() || isAdmin();
+      allow create: if (ownsIncoming() && validLog(request.resource.data)) || isAdmin();
+      allow update: if (ownsExisting() && ownsIncoming() && validLog(request.resource.data)) || isAdmin();
+      allow delete: if ownsExisting() || isAdmin();
     }
 
     // ── weights ───────────────────────────────────────────────────────────
+    function validWeight(d) {
+      return d.keys().hasOnly(['userId', 'date', 'kg', 'createdAt'])
+        && isDate(d.date)
+        && d.kg is number && d.kg > 0 && d.kg < 500
+        && (!('createdAt' in d) || isIso(d.createdAt));
+    }
+
     match /weights/{weightId} {
-      allow read: if isAdmin() || ownsExisting();
-      allow create: if isAdmin() || ownsIncoming();
-      allow update: if (ownsExisting() && ownsIncoming()) || isAdmin();
-      allow delete: if isAdmin() || ownsExisting();
+      allow read: if ownsExisting() || isAdmin();
+      allow create: if (ownsIncoming() && validWeight(request.resource.data)) || isAdmin();
+      allow update: if (ownsExisting() && ownsIncoming() && validWeight(request.resource.data)) || isAdmin();
+      allow delete: if ownsExisting() || isAdmin();
     }
 
     // ── 구독 관련 컬렉션 ──────────────────────────────────────────────────
-    // promoCodes / promoRedemptions / subEvents 는 전부 Cloud Functions(Admin SDK)
-    // 전용이다. 앱에서는 읽지도 쓰지도 않는다 — 코드 목록이 노출되면 안 된다.
+    // promoCodes / promoRedemptions / promoAttempts / subEvents 는 전부
+    // Cloud Functions(Admin SDK) 전용이다. 앱에서는 읽지도 쓰지도 않는다.
     match /promoCodes/{code} { allow read, write: if isAdmin(); }
     match /promoRedemptions/{id} { allow read, write: if isAdmin(); }
+    match /promoAttempts/{id} { allow read, write: if isAdmin(); }
     match /subEvents/{id} { allow read, write: if isAdmin(); }
 
     // ── 그 외 모든 경로 ───────────────────────────────────────────────────
