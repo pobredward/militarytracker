@@ -17,12 +17,22 @@
 import { Platform } from 'react-native';
 import { httpsCallable, FunctionsError } from 'firebase/functions';
 import { functions } from './firebase';
+import { refreshIdToken } from './authService';
 import type { Subscription } from '../types';
 import { normalizeSub } from '../utils/subscription';
 import { PRODUCTS, SubProduct } from '../config/entitlements';
 
 export class BillingUnavailable extends Error {}
 export class PromoError extends Error {}
+/** 서버가 이메일 인증을 요구했다 — 화면은 "인증 메일 다시 보내기" 를 띄운다 */
+export class EmailUnverified extends Error {}
+
+/**
+ * ⚠️ 결제 SDK(RevenueCat/expo-iap)를 붙이면 true 로 바꾼다.
+ * false 인 동안 구독 화면은 가격표·구매·복원·코드 입력을 숨긴다 — 동작하지 않는
+ * 결제 UI 와 앱 자체 코드로 유료 기능을 여는 UI 는 스토어 심사 거절 사유다(Apple 3.1.1/2.1).
+ */
+export const STORE_BILLING_READY = false;
 
 const msg = (e: unknown, fallback: string): string => {
   const m = (e as FunctionsError)?.message;
@@ -37,7 +47,7 @@ export async function getOfferings(): Promise<SubProduct[]> {
 /** 서버가 보는 현재 구독 상태 */
 export async function refreshSub(): Promise<Subscription | null> {
   try {
-    const call = httpsCallable(functions, 'subStatus');
+    const call = httpsCallable(functions, 'subStatus', { timeout: 15_000 });
     const res = await call({});
     return normalizeSub((res.data as { sub?: unknown })?.sub);
   } catch {
@@ -46,13 +56,19 @@ export async function refreshSub(): Promise<Subscription | null> {
   }
 }
 
-/** 무료 체험 시작. 계정당 1회, 서버에서 판정한다. */
+/** 무료 체험 시작. 계정당 1회 + 이메일 인증, 서버에서 판정한다. */
 export async function startTrial(): Promise<Subscription> {
+  // 방금 인증을 마쳤어도 email_verified 클레임은 새 토큰에만 실린다
+  await refreshIdToken();
   try {
-    const call = httpsCallable(functions, 'subStartTrial');
+    const call = httpsCallable(functions, 'subStartTrial', { timeout: 20_000 });
     const res = await call({});
     return normalizeSub((res.data as { sub?: unknown })?.sub);
   } catch (e) {
+    const d = (e as FunctionsError)?.details as { reason?: string } | undefined;
+    if (d?.reason === 'email_unverified') {
+      throw new EmailUnverified(msg(e, '이메일 인증 후 무료 체험을 시작할 수 있습니다.'));
+    }
     throw new PromoError(msg(e, '체험을 시작하지 못했습니다. 잠시 후 다시 시도해주세요.'));
   }
 }
@@ -62,7 +78,7 @@ export async function redeemPromo(code: string): Promise<Subscription> {
   const clean = code.trim().toUpperCase();
   if (!clean) throw new PromoError('코드를 입력해주세요.');
   try {
-    const call = httpsCallable(functions, 'subRedeemPromo');
+    const call = httpsCallable(functions, 'subRedeemPromo', { timeout: 20_000 });
     const res = await call({ code: clean });
     return normalizeSub((res.data as { sub?: unknown })?.sub);
   } catch (e) {
@@ -76,11 +92,6 @@ export function canPurchase(): boolean {
   if (Platform.OS === 'web') return false;
   return STORE_BILLING_READY;
 }
-
-/**
- * ⚠️ 결제 SDK 를 붙이면 true 로 바꾸고 아래 purchase/restore 를 구현한다.
- */
-const STORE_BILLING_READY = false;
 
 export async function purchase(_productId: string): Promise<Subscription> {
   if (Platform.OS === 'web') {

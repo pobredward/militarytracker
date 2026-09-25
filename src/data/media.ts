@@ -22,8 +22,9 @@ import type { VideoSource } from 'expo-video';
 export const MEDIA_BUCKET = 'military-tracker-96bdd';
 const BASE = `https://firebasestorage.googleapis.com/v0/b/${MEDIA_BUCKET}/o`;
 
+// rev 는 GCS generation(숫자 문자열). 매니페스트가 오염돼도 URL 에 임의 쿼리가 붙지 않게 인코딩한다
 const objectUrl = (path: string, rev?: string): string =>
-  `${BASE}/${encodeURIComponent(path)}?alt=media${rev ? `&v=${rev}` : ''}`;
+  `${BASE}/${encodeURIComponent(path)}?alt=media${rev ? `&v=${encodeURIComponent(rev)}` : ''}`;
 
 export const MANIFEST_URL = objectUrl('exercise/manifest.json');
 export const videoUrl = (id: string, rev: string) => objectUrl(`exercise/video/${id}.mp4`, rev);

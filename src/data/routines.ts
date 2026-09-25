@@ -33,7 +33,9 @@ export const ROUTINES: Routine[] = [
     subtitle: '주 3일 · 미는 동작 / 당기는 동작 / 하체',
     desc: '동작 방향으로 나누는 가장 검증된 3분할. 한 부위를 72시간 간격으로 자극해 회복과 빈도의 균형이 좋습니다.',
     daysPerWeek: 3,
-    level: 1,
+    // 바벨 스쿼트·바벨로우·풀업이 들어가는 구성이라 입문(1)이 아니라 중급으로 표기한다.
+    // 입문자는 recommendRoutine 이 fullbody 로 보낸다.
+    level: 2,
     place: ['gym'],
     tags: ['3분할', '헬스장', '밸런스'],
     days: [
@@ -150,9 +152,9 @@ export const ROUTINES: Routine[] = [
     id: 'core',
     name: '코어 10분',
     short: '코어',
-    subtitle: '주 3일 · 10분 복근 서킷',
-    desc: '메인 운동 후 붙이는 짧은 코어 서킷. 세트 간 휴식을 30초로 줄여 서킷처럼 돌립니다.',
-    daysPerWeek: 3,
+    subtitle: '주 2~3일 · 10분 복근 서킷',
+    desc: '메인 운동 후 붙이는 짧은 코어 서킷. 세트 간 휴식을 30초로 줄여 서킷처럼 돌립니다. A·B 두 세션을 번갈아 합니다.',
+    daysPerWeek: 2,
     level: 1,
     place: ['gym', 'home'],
     tags: ['코어', '10분', '서킷'],
@@ -188,7 +190,8 @@ export function recommendRoutine(opts: {
 }): Routine {
   const { place, days, level } = opts;
   if (place === 'home') return routineById('home3')!;
-  if (level === 1 && days <= 3) return routineById('fullbody')!;
+  // 입문자는 주 4일 이하까지 풀바디 — 바벨 복합운동 위주 분할은 중급부터
+  if (level === 1 && days <= 4) return routineById('fullbody')!;
   if (days >= 6) return routineById('ppl6')!;
   if (days === 5) return routineById('bro5')!;
   if (days === 4) return routineById('upperlower')!;

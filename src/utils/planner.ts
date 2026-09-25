@@ -76,7 +76,12 @@ export function buildLocalPlan(p: UserProfile, seed = Date.now()): Plan {
 
   const buildDay = (specKey: string): PlanDay => {
     const spec = SPECS[specKey];
-    const pool = shuffle(poolFor(spec.parts), rnd);
+    // 난이도는 '상한' 만 있으면 상급자에게 입문 종목이 절반 넘게 배정된다 —
+    // 셔플한 뒤 사용자 레벨에 가까운 종목이 앞에 오도록 안정 정렬한다
+    const pool = shuffle(poolFor(spec.parts), rnd)
+      .map((e, i) => ({ e, i }))
+      .sort((a, b) => (Math.abs(b.e.lv - maxLevel) < Math.abs(a.e.lv - maxLevel) ? 1 : Math.abs(b.e.lv - maxLevel) > Math.abs(a.e.lv - maxLevel) ? -1 : a.i - b.i))
+      .map((x) => x.e);
     const ids: string[] = [];
 
     // 부위를 고르게 섞기 위해 부위별로 한 종목씩 라운드로빈
@@ -112,21 +117,34 @@ export function buildLocalPlan(p: UserProfile, seed = Date.now()): Plan {
   };
 }
 
-/** AI 응답(days/reason)을 검증해 Plan 으로 변환. 유효하지 않으면 null */
+const str = (v: unknown, max: number): string => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+
+/**
+ * AI 응답(days/reason)을 검증해 Plan 으로 변환. 유효하지 않으면 null.
+ * 타입·길이·중복·장소를 전부 여기서 거른다 — 이 값은 저장되고 화면에 그대로 렌더된다.
+ * (planReason 이 object 로 저장되면 플랜 탭이 재시작마다 크래시한다)
+ */
 export function planFromAI(
   raw: unknown,
   fallbackProfile: UserProfile
 ): Plan | null {
-  const j = raw as { days?: { id?: string; name?: string; focus?: string; ids?: string[] }[]; reason?: string };
-  if (!j?.days?.length) return null;
+  const j = (raw ?? {}) as { days?: unknown; reason?: unknown };
+  if (!Array.isArray(j.days) || !j.days.length) return null;
+  const allowed = new Set(exFilter({ place: fallbackProfile.env }).map((e) => e.id));
+  const seen = new Set<string>();
 
   const days: PlanDay[] = j.days
+    .slice(0, 7)
     .map((d, i) => {
-      const ids = (d.ids ?? []).filter((id) => !!exById(id));
+      const x = (d ?? {}) as { id?: unknown; name?: unknown; focus?: unknown; ids?: unknown };
+      const ids = (Array.isArray(x.ids) ? x.ids : [])
+        .filter((id): id is string => typeof id === 'string' && allowed.has(id) && !seen.has(id))
+        .slice(0, 10);
+      ids.forEach((id) => seen.add(id));
       return {
-        id: d.id || `day${i + 1}`,
-        name: d.name || `Day ${i + 1}`,
-        focus: d.focus || '',
+        id: str(x.id, 24) || `day${i + 1}`,
+        name: str(x.name, 24) || `Day ${i + 1}`,
+        focus: str(x.focus, 40),
         ids,
       };
     })
@@ -137,7 +155,7 @@ export function planFromAI(
     routineId: null,
     days,
     planSrc: 'AI',
-    planReason: j.reason || `주 ${fallbackProfile.days}일 목표에 맞춘 AI 구성입니다.`,
+    planReason: str(j.reason, 200) || `주 ${fallbackProfile.days}일 목표에 맞춘 AI 구성입니다.`,
   };
 }
 
@@ -150,13 +168,22 @@ export function normalizePlan(plan: Plan | null | undefined): Plan | null {
   if (!plan || !Array.isArray(plan.days) || plan.days.length === 0) return null;
   const days: PlanDay[] = plan.days
     .map((d, i) => ({
-      id: d?.id || `day${i + 1}`,
-      name: d?.name || `Day ${i + 1}`,
-      focus: d?.focus || '',
-      ids: Array.isArray(d?.ids) ? d.ids.filter((x) => !!exById(x)) : [],
+      id: str(d?.id, 24) || `day${i + 1}`,
+      name: str(d?.name, 24) || `Day ${i + 1}`,
+      focus: str(d?.focus, 40),
+      // 같은 종목이 두 번 들어오면 세션에 같은 종목이 두 개 생기고 '지난 기록' 은 첫 것만 본다
+      ids: Array.isArray(d?.ids) ? [...new Set(d.ids.filter((x) => typeof x === 'string' && !!exById(x)))] : [],
     }))
     // 종목이 하나도 남지 않은 데이는 버린다 — 화면에서 undefined 참조를 만든다
     .filter((d) => d.ids.length > 0);
   if (!days.length) return null;
-  return { ...plan, days };
+  const planSrc: Plan['planSrc'] =
+    plan.planSrc === 'AI' || plan.planSrc === 'PRESET' || plan.planSrc === 'LOCAL' ? plan.planSrc : 'LOCAL';
+  return {
+    ...plan,
+    days,
+    planSrc,
+    planReason: str(plan.planReason, 300),
+    routineId: typeof plan.routineId === 'string' ? plan.routineId : null,
+  };
 }

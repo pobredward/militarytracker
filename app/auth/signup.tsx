@@ -8,14 +8,18 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  
   ScrollView,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link } from 'expo-router';
 import { signUpWithEmail } from '../../src/services/authService';
+import { useAuthStore } from '../../src/stores/authStore';
 import { colors } from '../../src/utils/colors';
 import { showAlert } from '../../src/utils/alert';
+import { LEGAL } from '../../src/config/entitlements';
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 export default function SignupScreen() {
   const [displayName, setDisplayName] = useState('');
@@ -23,10 +27,21 @@ export default function SignupScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  // 건강(신체) 정보는 민감정보라 별도 동의가 필요하다 — 셋 다 필수
+  const [agree, setAgree] = useState({ terms: false, privacy: false, health: false });
+  const allAgreed = agree.terms && agree.privacy && agree.health;
 
   async function handleSignup() {
     if (!displayName.trim() || !email.trim() || !password || !confirmPassword) {
       showAlert('입력 오류', '모든 항목을 입력해주세요.');
+      return;
+    }
+    if (!EMAIL_RE.test(email.trim())) {
+      showAlert('입력 오류', '올바른 이메일 형식이 아닙니다.');
+      return;
+    }
+    if (!allAgreed) {
+      showAlert('동의 필요', '이용약관·개인정보·건강정보 수집에 모두 동의해야 가입할 수 있습니다.');
       return;
     }
     if (password !== confirmPassword) {
@@ -39,8 +54,10 @@ export default function SignupScreen() {
     }
     setLoading(true);
     try {
-      await signUpWithEmail(email.trim(), password, displayName.trim());
-      // _layout.tsx의 onAuthChange가 onboarding 라우팅 처리
+      const u = await signUpWithEmail(email.trim(), password, displayName.trim());
+      // onAuthChange 가 문서보다 먼저 도착해 setUser(null) 이 되는 레이스가 있었다 —
+      // 가입 결과를 직접 스토어에 넣어 온보딩으로 확실히 넘긴다(_layout 도 같은 값을 다시 넣는다).
+      useAuthStore.getState().setUser(u);
     } catch (e: any) {
       const msg =
         e.code === 'auth/email-already-in-use'
@@ -73,14 +90,50 @@ export default function SignupScreen() {
           <Text style={s.label}>비밀번호 확인</Text>
           <TextInput style={s.input} placeholder="동일하게 입력" placeholderTextColor={colors.muted} value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry />
 
-          <TouchableOpacity style={[s.btn, loading && s.btnOff]} onPress={handleSignup} disabled={loading}>
+          <View style={s.agreeBox}>
+            <TouchableOpacity activeOpacity={0.7}
+              style={s.agreeAll}
+              onPress={() => setAgree(allAgreed ? { terms: false, privacy: false, health: false } : { terms: true, privacy: true, health: true })}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: allAgreed }}
+            >
+              <Text style={[s.box, allAgreed && s.boxOn]}>{allAgreed ? '✓' : ''}</Text>
+              <Text style={s.agreeAllTxt}>모두 동의합니다</Text>
+            </TouchableOpacity>
+            <Consent
+              on={agree.terms}
+              onToggle={() => setAgree((a) => ({ ...a, terms: !a.terms }))}
+              label="[필수] 이용약관 동의"
+              url={LEGAL.terms}
+            />
+            <Consent
+              on={agree.privacy}
+              onToggle={() => setAgree((a) => ({ ...a, privacy: !a.privacy }))}
+              label="[필수] 개인정보 수집·이용 동의"
+              url={LEGAL.privacy}
+            />
+            <Consent
+              on={agree.health}
+              onToggle={() => setAgree((a) => ({ ...a, health: !a.health }))}
+              label="[필수] 건강정보(신체·운동 기록) 수집·이용 동의"
+              url={LEGAL.privacy}
+            />
+          </View>
+
+          <TouchableOpacity activeOpacity={0.7}
+            style={[s.btn, (loading || !allAgreed) && s.btnOff]}
+            onPress={handleSignup}
+            disabled={loading || !allAgreed}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: loading || !allAgreed }}
+          >
             {loading ? <ActivityIndicator color={colors.bg} /> : <Text style={s.btnTxt}>가입하기</Text>}
           </TouchableOpacity>
 
           <View style={s.footer}>
             <Text style={s.footerTxt}>이미 계정이 있으신가요? </Text>
             <Link href="/auth/login" asChild>
-              <TouchableOpacity>
+              <TouchableOpacity activeOpacity={0.7}>
                 <Text style={s.link}>로그인</Text>
               </TouchableOpacity>
             </Link>
@@ -92,8 +145,44 @@ export default function SignupScreen() {
   );
 }
 
+function Consent({ on, onToggle, label, url }: { on: boolean; onToggle: () => void; label: string; url: string }) {
+  return (
+    <View style={s.consentRow}>
+      <TouchableOpacity activeOpacity={0.7}
+        style={s.consentMain}
+        onPress={onToggle}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: on }}
+        accessibilityLabel={label}
+      >
+        <Text style={[s.box, on && s.boxOn]}>{on ? '✓' : ''}</Text>
+        <Text style={s.consentTxt}>{label}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity activeOpacity={0.7} onPress={() => Linking.openURL(url)} hitSlop={10} accessibilityRole="link" accessibilityLabel={`${label} 내용 보기`}>
+        <Text style={s.consentLink}>보기</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  agreeBox: {
+    marginTop: 20, backgroundColor: colors.panel, borderRadius: 12,
+    borderWidth: 1, borderColor: colors.line, padding: 12, gap: 2,
+  },
+  agreeAll: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.line, marginBottom: 4 },
+  agreeAllTxt: { fontSize: 14, fontWeight: '700', color: colors.ink },
+  consentRow: { flexDirection: 'row', alignItems: 'center', minHeight: 40 },
+  consentMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
+  consentTxt: { fontSize: 13, color: colors.mid, flexShrink: 1 },
+  consentLink: { fontSize: 12, color: colors.muted, textDecorationLine: 'underline', paddingHorizontal: 4 },
+  box: {
+    width: 22, height: 22, borderRadius: 6, borderWidth: 1, borderColor: colors.line2,
+    color: colors.bg, fontSize: 14, fontWeight: '800', textAlign: 'center', lineHeight: 21,
+    overflow: 'hidden',
+  },
+  boxOn: { backgroundColor: colors.ink, borderColor: colors.ink },
   scroll: { flexGrow: 1, justifyContent: 'center', padding: 24 },
   header: { alignItems: 'center', marginBottom: 40 },
   logo: { fontSize: 22, fontWeight: '700', color: colors.ink, letterSpacing: 2 },

@@ -28,11 +28,14 @@ function parseManifest(raw: unknown): MediaManifest | null {
     if (!/^[A-Za-z0-9_]+$/.test(id) || !e || typeof e !== 'object') continue;
     const { video, poster } = e as MediaEntry;
     const entry: MediaEntry = {};
-    if (typeof video === 'string' && video) entry.video = video;
-    if (typeof poster === 'string' && poster) entry.poster = poster;
+    // generation 은 숫자 문자열이다 — 그 외 값은 버린다
+    if (typeof video === 'string' && /^\d{1,24}$/.test(video)) entry.video = video;
+    if (typeof poster === 'string' && /^\d{1,24}$/.test(poster)) entry.poster = poster;
     if (entry.video || entry.poster) items[id] = entry;
   }
-  return { updatedAt: typeof d.updatedAt === 'string' ? d.updatedAt : '', items };
+  // updatedAt 이 없으면 비교 기준이 없어 매 실행 번들↔원격을 오간다 — 파싱 실패로 본다
+  if (typeof d.updatedAt !== 'string' || !d.updatedAt) return null;
+  return { updatedAt: d.updatedAt, items };
 }
 
 const BUNDLED: MediaManifest = parseManifest(bundled) ?? { updatedAt: '', items: {} };

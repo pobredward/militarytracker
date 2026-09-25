@@ -26,6 +26,17 @@ export interface Subscription {
   updatedAt: string;
 }
 
+/**
+ * users/{uid}.stats — 개인 기록 요약. 클라이언트가 로그 저장 직후 갱신한다.
+ * 앱은 최근 로그 일부만 불러오므로, 오래된 PR 과 누적치는 여기서 읽는다.
+ */
+export interface UserStats {
+  /** exId → 역대 최고 세트 (맨몸/시간 종목은 w=0, r 최대) */
+  pr: Record<string, { w: number; r: number; date: string }>;
+  totalLogs: number;
+  totalVolume: number;
+}
+
 export interface User {
   uid: string;
   email: string | null;
@@ -39,6 +50,8 @@ export interface User {
   profile?: UserProfile | null;
   /** 구독 상태 — 서버 전용 필드 */
   sub?: Subscription | null;
+  /** 개인 기록 요약 — 클라이언트가 로그 저장 시 갱신 */
+  stats?: UserStats;
   createdAt: string;
   lastLoginAt: string;
 }
@@ -162,6 +175,8 @@ export interface BodyStats {
   bmi: string;
   bodyType: string;
   tdee: number;
+  /** TDEE 계산에 쓴 활동계수 (주 운동 일수 기준) */
+  activityFactor: number;
   kcal: number;
   tagline: string;
   protein: number;

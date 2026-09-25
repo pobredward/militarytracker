@@ -1,6 +1,6 @@
 /**
  * 구독 상태 판정 — 클라이언트/서버가 같은 규칙을 써야 한다.
- * 서버 사본: functions/src/entitlement.ts (evaluate 함수). 고칠 때 둘 다 고칠 것.
+ * 서버 사본: functions/src/entitlement.ts (isProSub / normalizeSub). 고칠 때 둘 다 고칠 것.
  */
 import type { Subscription } from '../types';
 
@@ -27,6 +27,9 @@ export function isProSub(sub: Subscription | null | undefined, now = Date.now())
   return Number.isFinite(t) && t > now;
 }
 
+/** 형식이 깨진 expiresAt 에 쓰는 "이미 만료" 값 — fail-open 이 아니라 fail-closed */
+const EXPIRED_AT = '1970-01-01T00:00:00.000Z';
+
 /** 서버에서 온 값이 깨져 있어도 앱이 죽지 않도록 */
 export function normalizeSub(raw: unknown): Subscription {
   const d = (raw ?? {}) as Partial<Subscription>;
@@ -40,10 +43,15 @@ export function normalizeSub(raw: unknown): Subscription {
     d.source === 'ios' || d.source === 'android' || d.source === 'promo' || d.source === 'admin'
       ? d.source
       : 'none';
+  // null/undefined 만 "만료 없음". Timestamp·number 등 다른 타입은 만료로 본다(서버와 동일)
+  const expiresAt =
+    d.expiresAt === null || d.expiresAt === undefined ? null
+    : typeof d.expiresAt === 'string' ? d.expiresAt
+    : EXPIRED_AT;
   return {
     tier,
     status,
-    expiresAt: typeof d.expiresAt === 'string' ? d.expiresAt : null,
+    expiresAt,
     source,
     productId: typeof d.productId === 'string' ? d.productId : null,
     trialUsed: d.trialUsed === true,

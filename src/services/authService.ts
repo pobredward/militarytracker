@@ -3,15 +3,15 @@ import {
   signInWithEmailAndPassword,
   signOut,
   updateProfile,
-  deleteUser,
   onAuthStateChanged,
   sendPasswordResetEmail,
+  sendEmailVerification,
   User as FirebaseUser,
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, writeBatch } from 'firebase/firestore';
-import { auth, db } from './firebase';
-import { User, UserProfile, Plan } from '../types';
-import { deleteAllUserData } from './workoutService';
+import { httpsCallable } from 'firebase/functions';
+import { auth, db, functions } from './firebase';
+import { User, UserProfile, Plan, UserStats } from '../types';
 import { normalizePlan } from '../utils/planner';
 import { normalizeSub } from '../utils/subscription';
 
@@ -37,11 +37,48 @@ export async function signUpWithEmail(
   displayName: string
 ): Promise<User> {
   const credential = await createUserWithEmailAndPassword(auth, email, password);
-  await updateProfile(credential.user, { displayName });
-
+  // 문서를 먼저 만든다 — _layout 의 onAuthChange 가 이 문서를 읽으러 오기 때문에
+  // updateProfile(네트워크) 뒤로 미루면 "문서 없음" 창이 넓어진다.
   const userData = baseUserDoc({ email, displayName, authProvider: 'email' });
   await setDoc(doc(db, 'users', credential.user.uid), userData);
+  await updateProfile(credential.user, { displayName }).catch(() => {});
+  // 무료 체험은 이메일 인증을 요구한다(서버). 발송 실패는 가입을 막지 않는다.
+  sendEmailVerification(credential.user).catch(() => {});
   return { uid: credential.user.uid, ...userData };
+}
+
+/**
+ * users/{uid} 문서가 없으면 만든다(멱등). 회원가입 직후 onAuthChange 가 setDoc 보다
+ * 먼저 도착하거나, 삭제 도중 실패한 계정이 남았을 때 여기서 복구한다.
+ */
+export async function ensureUserDoc(fu: FirebaseUser): Promise<User> {
+  const ref = doc(db, 'users', fu.uid);
+  const snap = await getDoc(ref);
+  if (snap.exists()) return normalizeUser(fu.uid, snap.data());
+  const userData = baseUserDoc({
+    email: fu.email,
+    displayName: fu.displayName,
+    photoURL: fu.photoURL,
+    authProvider: 'email',
+  });
+  await setDoc(ref, userData);
+  return { uid: fu.uid, ...userData };
+}
+
+/** 인증 메일 재발송 */
+export async function resendVerification(): Promise<void> {
+  const u = auth.currentUser;
+  if (!u) throw new Error('not signed in');
+  await sendEmailVerification(u);
+}
+
+/** 인증 완료 여부를 토큰에 반영한다(email_verified 클레임은 새 토큰에만 실린다) */
+export async function refreshIdToken(): Promise<boolean> {
+  const u = auth.currentUser;
+  if (!u) return false;
+  await u.reload().catch(() => {});
+  await u.getIdToken(true).catch(() => {});
+  return u.emailVerified;
 }
 
 export async function signInWithEmail(email: string, password: string): Promise<void> {
@@ -74,6 +111,26 @@ export async function logout(): Promise<void> {
   await signOut(auth);
 }
 
+/** 개인 기록 요약(users.stats) — 최근 N건 로그 밖의 PR 도 잃지 않도록 클라이언트가 저장 시 갱신한다 */
+function normalizeStats(raw: unknown): UserStats {
+  const d = (raw ?? {}) as Partial<UserStats>;
+  const pr: UserStats['pr'] = {};
+  if (d.pr && typeof d.pr === 'object') {
+    for (const [id, v] of Object.entries(d.pr as Record<string, unknown>)) {
+      const x = v as { w?: unknown; r?: unknown; date?: unknown };
+      const w = Number(x?.w), r = Number(x?.r);
+      if (Number.isFinite(w) && Number.isFinite(r) && w >= 0 && r > 0) {
+        pr[id] = { w, r, date: typeof x.date === 'string' ? x.date : '' };
+      }
+    }
+  }
+  return {
+    pr,
+    totalLogs: Math.max(0, Number(d.totalLogs) || 0),
+    totalVolume: Math.max(0, Number(d.totalVolume) || 0),
+  };
+}
+
 function normalizeUser(uid: string, data: Record<string, unknown> | undefined): User {
   const d = (data ?? {}) as Partial<User>;
   return {
@@ -87,6 +144,7 @@ function normalizeUser(uid: string, data: Record<string, unknown> | undefined): 
     profile: d.profile ?? null,
     // 구독은 서버(Cloud Functions)만 쓴다 — 여기서는 읽기만 한다
     sub: normalizeSub(d.sub),
+    stats: normalizeStats(d.stats),
     createdAt: d.createdAt ?? nowIso(),
     lastLoginAt: d.lastLoginAt ?? nowIso(),
   };
@@ -98,25 +156,17 @@ export async function fetchUserProfile(uid: string): Promise<User | null> {
   return normalizeUser(uid, snap.data());
 }
 
-/** 계정 + 하위 데이터 전체 삭제. 재인증이 필요하면 코드를 그대로 throw */
+/**
+ * 계정 + 하위 데이터 전체 삭제 — 서버(accountDelete 콜러블, Admin SDK)가 지운다.
+ * 클라이언트가 users 문서를 지울 수 있으면 구독·사용량을 초기화하는 우회로가 되므로
+ * 보안 규칙에서 막았고, Admin SDK 는 "최근 로그인" 제약도 없다.
+ * 서버가 auth 사용자를 지우면 onAuthStateChanged(null) 이 온다. 여기서는 signOut 만 보장한다.
+ */
 export async function deleteAccount(): Promise<void> {
-  const user = auth.currentUser;
-  if (!user) return;
-
-  // Firebase 는 최근 로그인(약 5분)을 요구한다.
-  // 데이터를 먼저 지우면 deleteUser 가 실패했을 때 계정만 남고 기록은 사라진다.
-  // 따라서 조건을 먼저 확인하고, 통과할 때만 삭제를 시작한다.
-  const lastSignIn = user.metadata.lastSignInTime
-    ? new Date(user.metadata.lastSignInTime).getTime()
-    : 0;
-  if (Date.now() - lastSignIn > 4 * 60 * 1000) {
-    const err = new Error('requires recent login') as Error & { code: string };
-    err.code = 'auth/requires-recent-login';
-    throw err;
-  }
-
-  await deleteAllUserData(user.uid);
-  await deleteUser(user);
+  if (!auth.currentUser) return;
+  const call = httpsCallable(functions, 'accountDelete', { timeout: 120_000 });
+  await call({});
+  await signOut(auth).catch(() => {});
 }
 
 /** 프로필·플랜을 한 번에 기록 — 중간에 끊겨 '온보딩 완료인데 플랜 없음' 상태가 되지 않도록 */
@@ -133,6 +183,11 @@ export async function saveOnboarding(
 
 export async function savePlan(uid: string, plan: Plan): Promise<void> {
   await setDoc(doc(db, 'plans', uid), { ...plan, updatedAt: nowIso() }, { merge: false });
+}
+
+/** 개인 기록 요약 저장 — 운동 로그 저장 직후 호출. 실패해도 로그 자체는 이미 저장돼 있다. */
+export async function saveStats(uid: string, stats: UserStats): Promise<void> {
+  await setDoc(doc(db, 'users', uid), { stats }, { merge: true });
 }
 
 export async function saveProfile(uid: string, profile: UserProfile): Promise<void> {

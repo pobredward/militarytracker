@@ -22,6 +22,7 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   async function handleLogin() {
     if (!email.trim() || !password.trim()) {
@@ -32,11 +33,19 @@ export default function LoginScreen() {
     try {
       await signInWithEmail(email.trim(), password);
     } catch (e: any) {
+      const code: string = e?.code ?? '';
+      // 최신 Firebase(이메일 열거 보호 ON)는 비밀번호 오류를 invalid-credential 로 준다
       const msg =
-        e.code === 'auth/user-not-found' || e.code === 'auth/wrong-password'
+        code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential'
           ? '이메일 또는 비밀번호가 올바르지 않습니다.'
-          : e.code === 'auth/invalid-email'
+          : code === 'auth/invalid-email'
           ? '올바른 이메일 형식이 아닙니다.'
+          : code === 'auth/too-many-requests'
+          ? '시도가 너무 많습니다. 잠시 후 다시 시도해주세요.'
+          : code === 'auth/network-request-failed'
+          ? '네트워크 연결을 확인해주세요.'
+          : code === 'auth/user-disabled'
+          ? '사용이 중지된 계정입니다.'
           : '로그인에 실패했습니다. 다시 시도해주세요.';
       showAlert('로그인 실패', msg);
     } finally {
@@ -50,9 +59,11 @@ export default function LoginScreen() {
       showAlert('이메일 입력', '가입하신 이메일을 먼저 입력해주세요.');
       return;
     }
+    if (resetting) return; // 연타로 메일이 여러 통 나가지 않게
+    setResetting(true);
     try {
       await resetPassword(target);
-      showAlert('메일 발송', `${target} 으로 비밀번호 재설정 링크를 보냈습니다.\n메일함을 확인해주세요.`);
+      showAlert('메일 발송', `${target}으로 비밀번호 재설정 링크를 보냈습니다.\n메일함을 확인해주세요.`);
     } catch (e: any) {
       showAlert(
         '발송 실패',
@@ -60,6 +71,8 @@ export default function LoginScreen() {
           ? '올바른 이메일 형식이 아닙니다.'
           : '메일 발송에 실패했습니다. 잠시 후 다시 시도해주세요.'
       );
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -94,18 +107,18 @@ export default function LoginScreen() {
             secureTextEntry
           />
 
-          <TouchableOpacity style={[s.btn, loading && s.btnOff]} onPress={handleLogin} disabled={loading}>
+          <TouchableOpacity activeOpacity={0.7} style={[s.btn, loading && s.btnOff]} onPress={handleLogin} disabled={loading}>
             {loading ? <ActivityIndicator color={colors.bg} /> : <Text style={s.btnTxt}>로그인</Text>}
           </TouchableOpacity>
 
-          <TouchableOpacity style={s.resetBtn} onPress={handleReset}>
+          <TouchableOpacity activeOpacity={0.7} style={s.resetBtn} onPress={handleReset}>
             <Text style={s.resetTxt}>비밀번호를 잊으셨나요?</Text>
           </TouchableOpacity>
 
           <View style={s.footer}>
             <Text style={s.footerTxt}>계정이 없으신가요? </Text>
             <Link href="/auth/signup" asChild>
-              <TouchableOpacity>
+              <TouchableOpacity activeOpacity={0.7}>
                 <Text style={s.link}>회원가입</Text>
               </TouchableOpacity>
             </Link>

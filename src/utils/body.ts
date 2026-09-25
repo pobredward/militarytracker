@@ -81,23 +81,67 @@ export function effectiveWeight(
  * Mifflin-St Jeor + 활동계수 1.5.
  * weights 를 넘기면 추세 체중으로 계산하고, 없으면 프로필의 기준 체중을 쓴다.
  */
+// ─── 입력 범위 ──────────────────────────────────────────────────────────────
+/** 온보딩·내 정보·체중 입력이 공유하는 허용 범위. 화면마다 규칙이 달라지면 안 된다. */
+export const PROFILE_RANGE = {
+  age: { min: 10, max: 100, label: '나이', unit: '세' },
+  height: { min: 100, max: 250, label: '키', unit: 'cm' },
+  weight: { min: 25, max: 300, label: '체중', unit: 'kg' },
+} as const;
+
+export type ProfileField = keyof typeof PROFILE_RANGE;
+
+/** '62,5' → 62.5, '72kg' → NaN (단위는 붙이지 않게 한다) */
+export const parseNum = (v: string | number): number => {
+  const n = Number(String(v).trim().replace(',', '.'));
+  return Number.isFinite(n) ? n : NaN;
+};
+
+/** 범위 안이면 null, 아니면 사용자에게 보여줄 메시지 */
+export function validateField(field: ProfileField, v: string | number): string | null {
+  const r = PROFILE_RANGE[field];
+  const n = parseNum(v);
+  if (!Number.isFinite(n)) return `${r.label}를 숫자로 입력해주세요.`;
+  if (n < r.min || n > r.max) return `${r.label}는 ${r.min}~${r.max}${r.unit} 사이로 입력해주세요.`;
+  return null;
+}
+
+/** 프로필 세 수치를 한 번에 검사. 첫 오류 메시지를 돌려준다 */
+export function validateProfile(p: Pick<UserProfile, 'age' | 'height' | 'weight'>): string | null {
+  return validateField('age', p.age) ?? validateField('height', p.height) ?? validateField('weight', p.weight);
+}
+
+/** 주 운동 일수 → 활동계수 (Mifflin-St Jeor 관행값) */
+export function activityFactor(days: number): number {
+  if (days <= 2) return 1.375;
+  if (days <= 4) return 1.55;
+  return 1.725;
+}
+
+/** 감량 시 하한 — 이 아래로 내려가면 식단 제안이 위험해진다 */
+const KCAL_FLOOR = { male: 1500, female: 1200 } as const;
+
 export function calcBodyStats(
   p: UserProfile | null | undefined,
   weights: WeightRecord[] = []
 ): BodyStats | null {
   if (!p) return null;
+  // 범위 밖 프로필로는 계산하지 않는다 (키 1.75 → BMI 235102 같은 값이 화면에 나가면 안 된다)
+  if (validateProfile(p)) return null;
   const eff = effectiveWeight(p, weights);
-  const W = eff?.kg ?? Number(p.weight);
-  const H = Number(p.height);
-  const A = Number(p.age);
+  const W = eff?.kg ?? parseNum(p.weight);
+  const H = parseNum(p.height);
+  const A = parseNum(p.age);
   if (!W || !H || !A) return null;
 
-  const bmi = W / (H / 100) ** 2;
+  // 분류와 표시가 어긋나지 않게 소수 1자리로 맞춘 값으로 판정한다
+  const bmi = Math.round((W / (H / 100) ** 2) * 10) / 10;
   const bodyType =
     bmi < 18.5 ? '마른 체형' : bmi < 23 ? '표준 체형' : bmi < 25 ? '과체중 경계' : '과체중';
 
   const bmr = 10 * W + 6.25 * H - 5 * A + (p.sex === 'male' ? 5 : -161);
-  const tdee = Math.round(bmr * 1.5);
+  const factor = activityFactor(p.days);
+  const tdee = Math.round(bmr * factor);
 
   let kcal = tdee;
   let tagline = '유지 칼로리';
@@ -108,6 +152,11 @@ export function calcBodyStats(
   if (p.goal === 'cut') {
     kcal = tdee - 400;
     tagline = '감량 (-400kcal)';
+    const floor = Math.max(KCAL_FLOOR[p.sex], Math.round(bmr));
+    if (kcal < floor) {
+      kcal = floor;
+      tagline = `감량 (하한 ${floor}kcal 적용)`;
+    }
   }
 
   const protein = Math.round(W * (p.goal === 'cut' ? 2.0 : 1.8));
@@ -118,6 +167,7 @@ export function calcBodyStats(
     bmi: bmi.toFixed(1),
     bodyType,
     tdee,
+    activityFactor: factor,
     kcal,
     tagline,
     protein,

@@ -44,22 +44,33 @@ function asSubRequired(e: unknown): SubscriptionRequired | null {
   return new SubscriptionRequired(err.message || '구독이 필요합니다.', d.feature ?? '');
 }
 
-/** 이번 달 코치 대화 횟수를 다 썼다 */
-export class CoachQuotaExceeded extends Error {
+/** AI 사용 한도를 다 썼다 — 코치(월), 플랜·식단(일). kind 로 구분한다 */
+export class QuotaExceeded extends Error {
   readonly limit: number;
-  constructor(message: string, limit: number) {
+  readonly kind: 'coach' | 'plan' | 'diet';
+  constructor(message: string, limit: number, kind: 'coach' | 'plan' | 'diet') {
     super(message);
     this.limit = limit;
+    this.kind = kind;
   }
 }
+/** 하위 호환 — 코치 화면이 이 이름으로 판별한다 */
+export const CoachQuotaExceeded = QuotaExceeded;
+export type CoachQuotaExceeded = QuotaExceeded;
 
-function asQuotaExceeded(e: unknown): CoachQuotaExceeded | null {
+function asQuotaExceeded(e: unknown): QuotaExceeded | null {
   const err = e as FunctionsError;
   if (err?.code !== 'functions/resource-exhausted') return null;
   const d = err.details as { reason?: string; limit?: number } | undefined;
-  if (d?.reason !== 'coach_quota_exceeded') return null;
-  return new CoachQuotaExceeded(err.message || '이번 달 코치 대화를 모두 사용했습니다.', Number(d.limit) || 0);
+  const kind = d?.reason === 'coach_quota_exceeded' ? 'coach'
+    : d?.reason === 'plan_quota_exceeded' ? 'plan'
+    : d?.reason === 'diet_quota_exceeded' ? 'diet' : null;
+  if (!kind) return null;
+  return new QuotaExceeded(err.message || 'AI 사용 한도를 모두 사용했습니다.', Number(d?.limit) || 0, kind);
 }
+
+/** 콜러블 대기 상한 — 서버는 55초에 끊는다. 기본 70초를 기다리게 두면 화면이 그만큼 잠긴다 */
+const CALL_TIMEOUT_MS = 40_000;
 
 function isUnavailable(e: unknown): boolean {
   const code = (e as FunctionsError)?.code ?? '';
@@ -79,18 +90,34 @@ function buildCatalog(p: UserProfile): string {
 }
 
 // ─── 플랜 ──────────────────────────────────────────────────────────────────
-export async function generatePlan(p: UserProfile): Promise<Plan> {
+export interface PlanResult {
+  plan: Plan;
+  /** AI 가 아니라 로컬 구성으로 대체됐는지 — 호출자가 사용자에게 알린다 */
+  fallback: boolean;
+  /** 폴백 사유(표시용) */
+  reason?: string;
+}
+
+/**
+ * AI 플랜. 실패하면 로컬 구성으로 대체하되 그 사실을 돌려준다 —
+ * 온보딩·플랜 화면이 "AI 플랜" 이라고 잘못 안내하지 않도록.
+ * 구독 없음(SubscriptionRequired)·한도 초과(QuotaExceeded)는 폴백하지 않고 던진다.
+ */
+export async function generatePlan(p: UserProfile): Promise<PlanResult> {
   try {
-    const call = httpsCallable(functions, 'aiPlan');
+    const call = httpsCallable(functions, 'aiPlan', { timeout: CALL_TIMEOUT_MS });
     const res = await call({ profile: p, catalog: buildCatalog(p) });
     const plan = planFromAI(res.data, p);
-    if (plan) return plan;
+    if (plan) return { plan, fallback: false };
+    return { plan: buildLocalPlan(p), fallback: true, reason: 'AI 응답을 해석하지 못했습니다.' };
   } catch (e) {
     const need = asSubRequired(e);
     if (need) throw need;
+    const over = asQuotaExceeded(e);
+    if (over) throw over;
     if (!isUnavailable(e)) console.warn('[aiPlan]', e);
+    return { plan: buildLocalPlan(p), fallback: true, reason: 'AI 연결에 실패했습니다.' };
   }
-  return buildLocalPlan(p);
 }
 
 // ─── 식단 ──────────────────────────────────────────────────────────────────
@@ -99,7 +126,7 @@ export async function generateDiet(p: UserProfile, stats?: BodyStats): Promise<D
   const st = stats ?? calcBodyStats(p);
   if (!st) return FALLBACK_DIET;
   try {
-    const call = httpsCallable(functions, 'aiDiet');
+    const call = httpsCallable(functions, 'aiDiet', { timeout: CALL_TIMEOUT_MS });
     const res = await call({
       bodyType: st.bodyType,
       goal: GOAL_LABEL[p.goal],
@@ -110,14 +137,35 @@ export async function generateDiet(p: UserProfile, stats?: BodyStats): Promise<D
       foodEnv: FOOD_LABEL[p.food],
       allergy: p.allergy || '없음',
     });
-    const j = res.data as DietPlan;
-    if (j?.meals?.length) return { ...j, src: 'AI', createdAt: new Date().toISOString() };
+    const j = normalizeDiet(res.data);
+    if (j) return { ...j, src: 'AI', createdAt: new Date().toISOString() };
   } catch (e) {
     const need = asSubRequired(e);
     if (need) throw need;
+    const over = asQuotaExceeded(e);
+    if (over) throw over;
     if (!isUnavailable(e)) console.warn('[aiDiet]', e);
   }
   return FALLBACK_DIET;
+}
+
+/**
+ * 서버 응답을 화면이 안전하게 렌더할 수 있는 형태로 정리한다.
+ * diet 는 persist 되므로 여기서 걸러내지 않으면 잘못된 응답이 재시작마다 크래시를 일으킨다.
+ */
+function normalizeDiet(raw: unknown): DietPlan | null {
+  const d = (raw ?? {}) as Partial<DietPlan>;
+  const meals = (Array.isArray(d.meals) ? d.meals : [])
+    .filter((m) => !!m && typeof m === 'object')
+    .slice(0, 8)
+    .map((m) => ({
+      t: String((m as { t?: unknown }).t ?? '').slice(0, 20),
+      m: String((m as { m?: unknown }).m ?? '').slice(0, 300),
+      k: String((m as { k?: unknown }).k ?? '').slice(0, 60),
+    }))
+    .filter((m) => m.t && m.m);
+  if (!meals.length) return null;
+  return { meals, tip: typeof d.tip === 'string' ? d.tip.slice(0, 200) : '' };
 }
 
 // ─── 코치 ──────────────────────────────────────────────────────────────────
@@ -144,8 +192,8 @@ export async function askCoach(
   context: string
 ): Promise<CoachReply> {
   try {
-    const call = httpsCallable(functions, 'aiCoach');
-    const res = await call({ messages, context });
+    const call = httpsCallable(functions, 'aiCoach', { timeout: CALL_TIMEOUT_MS });
+    const res = await call({ messages: messages.slice(-20), context });
     const d = res.data as { reply?: string; quota?: CoachQuota };
     if (d?.reply) return { reply: d.reply, quota: d.quota };
     throw new AIUnavailable();
