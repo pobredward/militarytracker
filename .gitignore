@@ -34,8 +34,7 @@ yarn-error.*
 .env*.local
 .env
 
-# Firebase
-.firebaserc
+# Firebase — .firebaserc 는 프로젝트 ID 뿐이라 커밋한다(새 클론에서 firebase deploy 가 프로젝트를 찾도록)
 
 # typescript
 *.tsbuildinfo
@@ -52,7 +51,7 @@ firebase-debug.log
 *-debug.log
 firestore-debug.log
 
-# 영상 원본(마스터) — 저장소에는 배포본(assets/exercise/video)만 둔다
+# (구버전 경로) 영상은 이제 버킷에 있다 — media/originals/ 참조
 /assets/video/
 
 # Firebase Hosting 배포 캐시

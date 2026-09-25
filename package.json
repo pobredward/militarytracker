@@ -35,7 +35,8 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "media:report": "node scripts/media-report.mjs",
-    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes",
+    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes,storage",
+    "deploy:hosting": "npx expo export --platform web && firebase deploy --only hosting",
     "deploy:functions": "firebase deploy --only functions",
     "media:upload": "node scripts/upload-videos.mjs"
   },
